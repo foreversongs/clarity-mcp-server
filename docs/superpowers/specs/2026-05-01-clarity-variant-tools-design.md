@@ -21,11 +21,24 @@ This spec proposes adding three new tools to the existing fork that hit `/api/v2
 ## Non-goals
 
 - Modifying any of Microsoft's existing code (`src/tools.ts`, `src/types.ts`, public API of `index.ts`). New code lives in new files.
-- Replacing the official MCP. The unfiltered NL-dashboard tool and unfiltered session-recordings tool stay; our new tools complement them.
+- Replacing the official MCP. The unfiltered NL-dashboard tool, unfiltered session-recordings tool, and documentation-resources tool stay; our new tools complement them.
 - Building a heatmap viewer or recording playback. Recording **links** are enough — humans click them in Slack.
 - Time-series breakdowns, smart-event-tagged tools, or per-element click drill-downs. Out of v1; revisit if asked.
 - Publishing to the public npm registry under a Microsoft-adjacent name.
 - Headless browser / Playwright auth flows. Cookie comes from a manual login on the operator's machine.
+
+## Why we keep all three official tools (not replacing any)
+
+We considered replacing `query-analytics-dashboard` (NL) and `list-session-recordings` with `/api/v2`-backed equivalents that would natively support custom tags, on the theory that the official tools are limited (the NL parser confuses "custom tag" with SmartEvent names; the recordings filter ignores `customTags`).
+
+We rejected that direction after re-reading the transcripts of every Clarity-related ask the boss has made. Findings:
+
+1. **Every non-variant Clarity question Cody has been asked is already answered correctly by the existing tools.** Aggregate metrics, top dead-click targets, top clicked elements, recordings filtered by URL — all work today on `/mcp/*`. The boss has never been blocked on a non-variant question because of the existing tools' limits.
+2. **The official tools' bugs only manifest for variant questions** — and our new tools cover that case directly. Once Cody routes variant questions to `compare-by-variant` and non-variant questions to the existing tools, no question hits a broken code path.
+3. **Cody has never invoked `query-documentation-resources` in any captured session.** He answers Clarity-doc questions from his pretraining. The infrastructure already supports the tool, and removing it would force a re-think of the bearer-token plumbing for zero benefit. Leave it.
+4. **Replacement would mean rewriting working code under us with reverse-engineered code.** Higher risk, no user-visible win. Adding net-new tools is strictly safer.
+
+The result: 6 tools total, 2 independent auth models, no Microsoft code touched.
 
 ## Architecture
 
