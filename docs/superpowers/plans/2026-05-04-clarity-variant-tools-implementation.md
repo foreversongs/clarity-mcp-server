@@ -28,8 +28,10 @@ Files we will create:
 | `src/dashboard/__tests__/filters.test.ts` | Filter-envelope unit tests |
 | `src/dashboard/__tests__/date-range.test.ts` | Date parser unit tests |
 | `src/dashboard/__tests__/tools.test.ts` | Tool integration tests with `fetch` mocked |
-| `scripts/probe.ts` | Smoke test: hit `getSessionsInfo` with no-op filter, assert response shape. Run via `npm run probe` |
+| `scripts/probe.ts` | Smoke test: tag discovery, variant filter, parity vs. fixture. CI-gated; exits non-zero on drift. Run via `npm run probe` |
+| `scripts/captures/parity-fixture.json` | Pinned baseline metrics from live dashboard. Probe asserts ±2% drift |
 | `scripts/capture-operations.md` | Operator-facing doc: how to re-run the Playwright capture if Microsoft changes operation names |
+| `docs/superpowers/notes/parity-drift-triage.md` | Triage table: which symptom maps to which fix when probe parity fails |
 | `vitest.config.ts` | Vitest config (ESM-aware, points at `src/**/__tests__/*.test.ts`) |
 
 Files we will modify:
@@ -2294,42 +2296,159 @@ git commit -m "feat(index): register 4 dashboard tools + docs tool, drop NL/old 
 
 ## Task 15: Smoke-test script (`npm run probe`)
 
-Hits the live `/api/v2` to confirm the cookie + queries work end-to-end. Not a CI test — run by the operator before deploys.
+Hits the live `/api/v2` to confirm the cookie + queries + parity hold. **Designed to be CI-callable** — runs before each deploy of the fork. Exits non-zero on any failure including parity drift, so a CI hook or pre-deploy script can gate on it.
 
 **Files:**
 - Create: `scripts/probe.ts`
+- Create: `scripts/captures/parity-fixture.json`
+- Create: `docs/superpowers/notes/parity-drift-triage.md`
 
-- [ ] **Step 1: Create scripts/probe.ts**
+The probe runs four checks:
+1. **Auth + tag discovery** — `list-custom-tags` returns >0 keys.
+2. **Variant filter is honored** — sessions differ for `cro-cart-3way=0` vs `=1`.
+3. **Parity vs. dashboard fixture** — load `parity-fixture.json`, re-fetch the same metrics, fail if any drifts >2%.
+4. **Triage advice on failure** — point operator at `parity-drift-triage.md`.
+
+- [ ] **Step 1: Create the parity fixture**
+
+The operator captures a snapshot from the live dashboard and saves it once. Subsequent probe runs assert against this baseline.
+
+Create `scripts/captures/parity-fixture.json`:
+
+```json
+{
+  "capturedAt": "2026-05-04T15:00:00Z",
+  "capturedBy": "<operator name>",
+  "dashboardUrl": "https://clarity.microsoft.com/projects/view/w3y4c1nfgk/dashboard?date=Last%207%20days",
+  "dateRange": "last 7 days",
+  "tolerance": 0.02,
+  "expected": {
+    "sessions.total":  0,
+    "deadClickRate":   0,
+    "scrollDepth":     0
+  },
+  "notes": "Replace 0s with the values shown on the live dashboard for the same date range. Re-capture quarterly or whenever Microsoft visibly changes the dashboard."
+}
+```
+
+The first time someone runs the probe, they fill in the `expected` numbers from the live dashboard. After that, the file is git-tracked and probe runs assert against it.
+
+- [ ] **Step 2: Create the triage doc**
+
+Create `docs/superpowers/notes/parity-drift-triage.md`:
+
+```markdown
+# Parity Drift Triage
+
+When `npm run probe` reports drift > 2% on one or more metrics, find the row that matches the symptom and follow its action.
+
+| Symptom | Likely cause | Action |
+|---|---|---|
+| ONE metric drifts (e.g. only `scrollDepth` is off) | Operation rename, response shape change, or wrong `responseExtractPath` for that op | Open Playwright on the dashboard, look at the network call for the affected metric, diff the operation against `src/dashboard/operations.ts`, fix the entry. |
+| ALL metrics drift by ~the same ratio | Filter envelope or date-range bug applying globally | Inspect the `filters` JSON the probe sends (log it). Compare against a captured-from-dashboard envelope. Check for missing default clauses (e.g. bot exclusion). |
+| Counts drift but rates don't (or vice versa) | Bot-filter default mismatch — dashboard auto-excludes bots, our envelope doesn't | Add the bot-exclusion clause to `buildFilterEnvelope` based on captures. |
+| Drift is small (<5%) and steady across runs | Time-window jitter at the edges; not a real bug | Lower the tolerance threshold cautiously OR widen the fixture's `dateRange` to a less time-sensitive window. |
+| Drift is huge (>50%) or erratic | Microsoft renamed a GraphQL operation or changed auth | Re-run the Task 1 capture entirely. Diff `operations.json` against the version in git. |
+| Drift on `cro-cart-3way` variant filter only | `Variables` field renamed in dashboard | Re-capture filter-fields.json; update `buildFilterEnvelope` Variables row. |
+
+After fixing: re-run `npm run probe`. If clean, commit. If not, drop another row in this triage table for the new symptom.
+
+## Re-capturing the fixture
+
+If the dashboard truly *should* show different numbers (e.g. 7 days of new traffic since last capture, or you re-defined the metric on Clarity's side), update `scripts/captures/parity-fixture.json` with new values and bump `capturedAt`. Don't update without diffing — silent fixture changes can hide real regressions.
+```
+
+- [ ] **Step 3: Create scripts/probe.ts**
 
 ```ts
 import "dotenv/config";
+import { readFileSync } from "fs";
 import { listCustomTags, queryMetrics } from "../src/dashboard/tools.js";
 
+interface ParityFixture {
+  capturedAt: string;
+  dateRange: string;
+  tolerance: number;
+  expected: Record<string, number>;
+}
+
+function relativeError(actual: number, expected: number): number {
+  if (expected === 0) return actual === 0 ? 0 : Infinity;
+  return Math.abs(actual - expected) / expected;
+}
+
+function getNested(obj: unknown, path: string): unknown {
+  return path.split(".").reduce<unknown>((acc, key) => {
+    if (acc && typeof acc === "object" && key in (acc as Record<string, unknown>)) {
+      return (acc as Record<string, unknown>)[key];
+    }
+    return undefined;
+  }, obj);
+}
+
 async function main() {
+  let exitCode = 0;
   console.log("Probing Clarity /api/v2 with current cookie...\n");
 
+  // === Check 1: Auth + tag discovery ===
   console.log("[1/3] list-custom-tags");
   const tags = await listCustomTags();
   console.log("  → Got", tags.length, "tag keys:", tags.slice(0, 5).join(", "), tags.length > 5 ? "..." : "");
   if (tags.length === 0) throw new Error("Expected at least 1 custom tag key. Has the project run any clarity('set', ...) calls?");
 
-  console.log("\n[2/3] query-metrics with no filter (last 7 days)");
-  const baseline = await queryMetrics({ metrics: ["sessions"] });
-  console.log("  → sessions:", baseline.sessions);
-  if (!baseline.sessions || baseline.sessions.total <= 0) throw new Error("Expected total sessions > 0 for last 7 days.");
-
-  console.log("\n[3/3] query-metrics with custom-tag filter (cro-cart-3way=0 vs =1)");
+  // === Check 2: Variant filter is honored ===
+  console.log("\n[2/3] variant filter (cro-cart-3way=0 vs =1)");
   const v0 = await queryMetrics({ filters: { tagKey: "cro-cart-3way", tagValue: "0" }, metrics: ["sessions"] });
   const v1 = await queryMetrics({ filters: { tagKey: "cro-cart-3way", tagValue: "1" }, metrics: ["sessions"] });
   console.log("  → v0 sessions:", v0.sessions, "v1 sessions:", v1.sessions);
-  if (!v0.sessions || !v1.sessions) throw new Error("Expected both variants to return sessions.");
-  if (v0.sessions.total === v1.sessions.total) {
-    console.warn("  ⚠ Both variants returned identical session counts — filter may not be applied. Investigate before relying on data.");
+  if (!v0.sessions || !v1.sessions) {
+    console.error("  ✗ Both variants must return sessions");
+    exitCode = 1;
+  } else if (v0.sessions.total === v1.sessions.total) {
+    console.error("  ✗ Variants returned identical session counts — variant filter likely ignored. See docs/superpowers/notes/parity-drift-triage.md");
+    exitCode = 1;
   } else {
-    console.log("  ✓ Variant filter is producing distinct results.");
+    console.log("  ✓ Variant filter is producing distinct results");
   }
 
-  console.log("\n✓ Probe successful.");
+  // === Check 3: Parity vs. fixture ===
+  console.log("\n[3/3] parity vs. dashboard fixture");
+  const fixture: ParityFixture = JSON.parse(readFileSync("scripts/captures/parity-fixture.json", "utf8"));
+  console.log("  Fixture captured", fixture.capturedAt, "for dateRange", fixture.dateRange);
+
+  const allExpectedZero = Object.values(fixture.expected).every((v) => v === 0);
+  if (allExpectedZero) {
+    console.warn("  ⚠ All expected values are 0 — fixture has not been populated yet. Edit scripts/captures/parity-fixture.json with values from the live dashboard.");
+    console.warn("  ⚠ Skipping parity check until fixture is populated.");
+  } else {
+    const baseline = await queryMetrics({
+      metrics: ["sessions", "deadClicks", "scrollDepth"],
+      dateRange: fixture.dateRange,
+    });
+    const drifts: { metric: string; expected: number; actual: number; rel: number }[] = [];
+    for (const [path, expected] of Object.entries(fixture.expected)) {
+      const actual = Number(getNested(baseline, path) ?? NaN);
+      const rel = relativeError(actual, expected);
+      drifts.push({ metric: path, expected, actual, rel });
+      const ok = rel <= fixture.tolerance;
+      const pct = (rel * 100).toFixed(2);
+      console.log(`  ${ok ? "✓" : "✗"} ${path}: actual=${actual}, expected=${expected}, drift=${pct}%`);
+      if (!ok) exitCode = 1;
+    }
+    if (exitCode !== 0) {
+      console.error("\n  ✗ One or more metrics drifted beyond tolerance.");
+      console.error("    Triage: docs/superpowers/notes/parity-drift-triage.md");
+    } else {
+      console.log("  ✓ All metrics within ±" + (fixture.tolerance * 100) + "% of fixture");
+    }
+  }
+
+  if (exitCode === 0) {
+    console.log("\n✓ Probe successful.");
+  } else {
+    console.error("\n✗ Probe failed.");
+  }
+  process.exit(exitCode);
 }
 
 main().catch((err) => {
@@ -2378,9 +2497,11 @@ If the probe fails with `DashboardAuthError`, capture a fresh cookie. If it fail
 - [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/probe.ts package.json package-lock.json
-git commit -m "feat(scripts): probe script to smoke-test /api/v2 connectivity + variant filter"
+git add scripts/probe.ts scripts/captures/parity-fixture.json docs/superpowers/notes/parity-drift-triage.md package.json package-lock.json
+git commit -m "feat(scripts): probe script with parity check, fixture, and drift triage doc"
 ```
+
+Note: do not populate `parity-fixture.json` with real numbers in this commit. That happens in Task 17 Step 4 once the dashboard values are read fresh. Commit the fixture with `0`s and the warning note.
 
 ---
 
@@ -2514,41 +2635,23 @@ npm run probe
 
 Expected: green output as in Task 15.
 
-- [ ] **Step 4: Pinned parity check against the live dashboard (acceptance criterion #4)**
+- [ ] **Step 4: Pinned parity check via the probe (acceptance criterion #4)**
 
-Goal: prove `query-metrics` with no filters reproduces the unfiltered dashboard within ±2% on three load-bearing metrics.
+The parity check is built into `npm run probe` (Task 15). Verification here is just: run the probe and confirm it passes.
 
-a) Open the live dashboard at `clarity.microsoft.com/projects/view/<project-id>/dashboard?date=Last%207%20days`. Capture the values shown for:
-   - Sessions (totalSessions number on the Sessions card)
-   - Dead-click rate (% on the dead-click card or behavior section)
-   - Scroll depth (avg %)
+a) Populate `scripts/captures/parity-fixture.json`. Open the live dashboard at `clarity.microsoft.com/projects/view/<project-id>/dashboard?date=Last%207%20days`. Read the visible numbers for sessions, dead-click rate, scroll depth. Replace the `0` values in the fixture with those numbers. Update `capturedAt` and `capturedBy`. Commit the fixture.
 
-   Save these to `scripts/captures/parity-fixture.json`:
-   ```json
-   {
-     "capturedAt": "2026-05-04T15:00:00Z",
-     "dashboardUrl": "<exact URL with date param>",
-     "expected": {
-       "sessions.total": <number>,
-       "deadClickRate": <number>,
-       "scrollDepth": <number>
-     }
-   }
-   ```
+b) Run the probe:
 
-b) Run the same period through `query-metrics`:
-   ```bash
-   node -e "
-   import('./dist/dashboard/tools.js').then(async ({ queryMetrics }) => {
-     const r = await queryMetrics({ metrics: ['sessions', 'deadClicks', 'scrollDepth'], dateRange: 'last 7 days' });
-     console.log(JSON.stringify(r, null, 2));
-   });
-   "
-   ```
+```bash
+CLARITY_PROJECT_ID=w3y4c1nfgk \
+  CLARITY_DASHBOARD_COOKIE="$(grep -E '^CLARITY_DASHBOARD_COOKIE=' .env | cut -d= -f2-)" \
+  npm run probe
+```
 
-c) Compute relative error for each metric: `|actual - expected| / expected`. Each must be ≤ 2%.
+Expected: probe exits 0 with all three checks ✓ — including all parity metrics within ±2%.
 
-If any metric exceeds 2%, **stop**. Possible causes: filter envelope diff (e.g. dashboard implicitly filters bots; we don't), date-range edge mismatch, or operation drift. Re-capture (Task 1) and re-test before proceeding.
+c) If the probe exits non-zero on parity drift, follow `docs/superpowers/notes/parity-drift-triage.md`. Do NOT proceed to Cody E2E (Step 6) until the probe is clean.
 
 - [ ] **Step 4b: Transcript replay — every Cody Clarity workflow we have evidence of**
 
