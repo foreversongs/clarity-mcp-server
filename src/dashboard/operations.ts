@@ -143,15 +143,16 @@ export const GET_TOP_CLICKED_ELEMENTS: Operation = {
 /**
  * LIST_CUSTOM_TAG_KEYS: per `operations.json._stillToCapture`, the dashboard
  * populates the tag-key dropdown without firing a fresh GraphQL call (likely
- * cached or part of getProjectSummary metadata). The likely path is to
- * extend `getFilterOptions` to include a `Variables` selection. The Task 8
- * implementer should fix this by capturing during just-in-time probing.
+ * cached or part of getProjectSummary metadata). Provisional shape until the
+ * real operation is captured live: assume a dedicated `customTagKeys` field on
+ * `projectFeatures` returning an array of strings. Tool layer (`listCustomTags`)
+ * is structured so swapping the operation later is a one-file change.
  */
-// TODO(task-8): capture from live dashboard
+// TODO(task-8): capture from live dashboard and replace this stub
 export const LIST_CUSTOM_TAG_KEYS: Operation = {
-  operationName: "getFilterOptions",
-  query: "query getFilterOptions($projectId: String!, $filter: String!, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — not yet observed live, capture in Task 8's probe step */ projectFeatures(id: $projectId) { id filterOptions(serializedFilter: $filter, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { Variables __typename } __typename } }",
-  responseExtractPath: "data.projectFeatures.filterOptions.Variables",
+  operationName: "listCustomTagKeys",
+  query: "query listCustomTagKeys($projectId: String!) { /* PROVISIONAL — not yet observed live; field name and operation name are educated guesses based on the dashboard's tag-key dropdown. Replace once captured. */ projectFeatures(id: $projectId) { id customTagKeys __typename } }",
+  responseExtractPath: "data.projectFeatures.customTagKeys",
 };
 
 /**
