@@ -61,6 +61,62 @@ The engineer should read these spec sections before starting:
 
 ---
 
+## Task 0: Terms of Service review (blocking gate before any code)
+
+**Files:**
+- Create: `docs/superpowers/notes/2026-05-04-clarity-tos-review.md`
+
+The spec's "Terms of Service" section calls for a 5-minute pass over Clarity's terms before reverse-engineering an undocumented endpoint. If anything looks restrictive, we revisit (file the upstream issue and live with the gap until Microsoft responds).
+
+- [ ] **Step 1: Read the relevant terms**
+
+Open in a browser:
+- `https://clarity.microsoft.com/terms`
+- Microsoft Services Agreement linked from above
+- Any ToS specifically for the Data Export API at `learn.microsoft.com/en-us/clarity/setup-and-installation/clarity-data-export-api`
+
+Spend ~5 minutes scanning for clauses about: automation, scraping, reverse engineering, undocumented APIs, rate limits, account suspension grounds.
+
+- [ ] **Step 2: Write a short note**
+
+Write `docs/superpowers/notes/2026-05-04-clarity-tos-review.md`:
+
+```markdown
+# Clarity ToS Review for /api/v2 cookie-proxy approach
+
+**Date:** 2026-05-04
+**Reviewer:** <your name>
+
+## Sources reviewed
+- https://clarity.microsoft.com/terms
+- <other URLs you scanned>
+
+## Findings
+
+<one paragraph: did you find any clauses that bear on automated calls
+to the dashboard with the operator's own session cookie, scraping, or
+reverse engineering?>
+
+## Decision
+
+- [ ] PROCEED — no restrictive clauses found
+- [ ] PROCEED WITH CAUTION — <list specific concerns and how we address them>
+- [ ] HALT — <list blocking clauses; pivot to upstream issue only>
+```
+
+- [ ] **Step 3: Commit (or halt)**
+
+If decision is PROCEED or PROCEED WITH CAUTION:
+
+```bash
+git add docs/superpowers/notes/2026-05-04-clarity-tos-review.md
+git commit -m "docs: clarity ToS review — proceed with /api/v2 implementation"
+```
+
+If HALT, file the upstream issue (Task 17 step 7) immediately and stop. Document why in the note.
+
+---
+
 ## Task 1: Capture GraphQL operations and filter-field map (no code yet)
 
 This is a manual step using Playwright + the live Clarity dashboard. Output is a JSON file the next tasks consume.
@@ -1240,6 +1296,8 @@ Expected: FAIL — `Cannot find module '../tools.js'`.
 
 - [ ] **Step 3: Implement listCustomTags + supporting helpers**
 
+> Note: this task introduces shared helpers (`getProjectId`, `extract`) that Tasks 9, 10, 11 reuse. Don't refactor them away into a separate module.
+
 Create `src/dashboard/tools.ts`:
 
 ```ts
@@ -1419,11 +1477,17 @@ import {
   type Operation,
 } from "./operations.js";
 
-export const QueryMetricsInput = z.object({
+// Plain-object shape used by McpServer.tool() for parameter validation.
+// The MCP SDK expects a record of Zod schemas, not a ZodObject. This matches
+// upstream's `ListRequest`/`SearchRequest` pattern in src/types.ts.
+export const QueryMetricsInputShape = {
   filters: Filters.optional(),
   metrics: z.array(MetricKey).optional(),
   dateRange: z.string().optional(),
-});
+};
+
+// Object form used internally for `parse()` and TypeScript inference.
+export const QueryMetricsInput = z.object(QueryMetricsInputShape);
 
 export type QueryMetricsInputType = z.infer<typeof QueryMetricsInput>;
 
@@ -1503,10 +1567,21 @@ export async function queryMetrics(input: QueryMetricsInputType): Promise<QueryM
   const projectId = getProjectId();
   const warnings: string[] = [];
 
+  // Pagination params (skip/limit/isAscending) only apply to the "top X"
+  // operations. Other ops will reject or silently strip unknown variables, so
+  // we send them only where the captured operation contract expects them.
+  const PAGINATED_OPS = new Set([
+    "topReferrers", "topPages", "topDeadClickTargets", "topClickedElements",
+  ]);
+
   const results = await Promise.allSettled(
     metrics.map(async (m) => {
       const op = METRIC_TO_OP[m];
-      const response = await postGraphQL(op.operationName, op.query, { projectId, filters: filtersStr, isAppProject: false, includePageQualityIssuesSessions: false, limit: 12, isAscending: false });
+      const baseVars = { projectId, filters: filtersStr, isAppProject: false, includePageQualityIssuesSessions: false };
+      const variables = PAGINATED_OPS.has(m)
+        ? { ...baseVars, skip: 0, limit: 12, isAscending: false }
+        : baseVars;
+      const response = await postGraphQL(op.operationName, op.query, variables);
       const raw = extract(response, op.responseExtractPath);
       return [m, shapeMetric(m, raw)] as const;
     }),
@@ -1517,6 +1592,10 @@ export async function queryMetrics(input: QueryMetricsInputType): Promise<QueryM
     dateRange: { start: range.start.toISOString(), end: range.end.toISOString() },
   };
 
+  // The MetricKey enum names mirror the dashboard cards ("deadClicks",
+  // "rageClicks", "jsErrors"), but the natural output field for each is a
+  // RATE (percentage), not a count. Rename on the way out so the response
+  // is self-documenting.
   results.forEach((r, idx) => {
     if (r.status === "fulfilled") {
       const [key, value] = r.value;
@@ -1629,12 +1708,14 @@ Append to `src/dashboard/tools.ts`:
 ```ts
 import { GET_RECORDINGS } from "./operations.js";
 
-export const ListRecordingsInput = z.object({
+export const ListRecordingsInputShape = {
   filters: Filters.optional(),
   count: z.number().int().min(1).max(250).default(10),
   sortBy: z.enum(["newest", "oldest", "longest", "shortest", "most-clicks", "most-pages"]).default("newest"),
   dateRange: z.string().optional(),
-});
+};
+
+export const ListRecordingsInput = z.object(ListRecordingsInputShape);
 
 export type ListRecordingsInputType = z.infer<typeof ListRecordingsInput>;
 
@@ -1784,12 +1865,14 @@ Append to `src/dashboard/tools.ts`:
 ```ts
 import { LIST_CUSTOM_TAG_VALUES } from "./operations.js";
 
-export const CompareByVariantInput = z.object({
+export const CompareByVariantInputShape = {
   tagKey: z.string(),
   additionalFilters: Filters.omit({ tagKey: true, tagValue: true }).optional(),
   metrics: z.array(MetricKey).optional(),
   dateRange: z.string().optional(),
-});
+};
+
+export const CompareByVariantInput = z.object(CompareByVariantInputShape);
 
 export type CompareByVariantInputType = z.infer<typeof CompareByVariantInput>;
 
@@ -2076,9 +2159,9 @@ import {
 } from "./constants.js";
 import { SYSTEM_INSTRUCTIONS_PROMPT } from "./instructions.js";
 import {
-  CompareByVariantInput,
-  ListRecordingsInput,
-  QueryMetricsInput,
+  CompareByVariantInputShape,
+  ListRecordingsInputShape,
+  QueryMetricsInputShape,
   compareByVariant,
   listCustomTags,
   listSessionRecordings,
@@ -2119,7 +2202,7 @@ server.tool(
 server.tool(
   QUERY_METRICS_TOOL,
   QUERY_METRICS_DESCRIPTION,
-  QueryMetricsInput.shape,
+  QueryMetricsInputShape,
   { title: "Query Clarity Metrics", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   async (input) => {
     try {
@@ -2135,7 +2218,7 @@ server.tool(
 server.tool(
   SESSION_RECORDINGS_TOOL,
   NEW_SESSION_RECORDINGS_DESCRIPTION,
-  ListRecordingsInput.shape,
+  ListRecordingsInputShape,
   { title: "List Session Recordings", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   async (input) => {
     try {
@@ -2151,7 +2234,7 @@ server.tool(
 server.tool(
   COMPARE_BY_VARIANT_TOOL,
   COMPARE_BY_VARIANT_DESCRIPTION,
-  CompareByVariantInput.shape,
+  CompareByVariantInputShape,
   { title: "Compare by Variant", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   async (input) => {
     try {
@@ -2198,7 +2281,7 @@ main().catch((error) => {
 npm run build
 ```
 
-Expected: clean build. (If TypeScript complains about `.shape` on a `ZodObject`, this is fine — `.shape` is the standard MCP-SDK pattern for parameter schemas.)
+Expected: clean build. The `*Shape` exports are plain objects of Zod schemas, matching upstream's `ListRequest`/`SearchRequest` pattern in `src/types.ts`. The MCP SDK accepts those directly as parameter schemas.
 
 - [ ] **Step 3: Commit**
 
@@ -2431,21 +2514,82 @@ npm run probe
 
 Expected: green output as in Task 15.
 
-- [ ] **Step 4: Spot-check `query-metrics` no-filter parity**
+- [ ] **Step 4: Pinned parity check against the live dashboard (acceptance criterion #4)**
 
-Manually compare a `query-metrics` call (no filters) against the live Clarity dashboard for the same date range. Sessions, dead-click rate, scroll depth should be within ±2%.
+Goal: prove `query-metrics` with no filters reproduces the unfiltered dashboard within ±2% on three load-bearing metrics.
 
-Use the probe output as a starting point; for spot-checks, run a manual REPL or use the MCP via `mcp` CLI:
+a) Open the live dashboard at `clarity.microsoft.com/projects/view/<project-id>/dashboard?date=Last%207%20days`. Capture the values shown for:
+   - Sessions (totalSessions number on the Sessions card)
+   - Dead-click rate (% on the dead-click card or behavior section)
+   - Scroll depth (avg %)
 
-```bash
-# In a separate shell with the env set:
-node -e "
-import('./dist/dashboard/tools.js').then(async ({ queryMetrics }) => {
-  const r = await queryMetrics({});
-  console.log(JSON.stringify(r, null, 2));
-});
-"
+   Save these to `scripts/captures/parity-fixture.json`:
+   ```json
+   {
+     "capturedAt": "2026-05-04T15:00:00Z",
+     "dashboardUrl": "<exact URL with date param>",
+     "expected": {
+       "sessions.total": <number>,
+       "deadClickRate": <number>,
+       "scrollDepth": <number>
+     }
+   }
+   ```
+
+b) Run the same period through `query-metrics`:
+   ```bash
+   node -e "
+   import('./dist/dashboard/tools.js').then(async ({ queryMetrics }) => {
+     const r = await queryMetrics({ metrics: ['sessions', 'deadClicks', 'scrollDepth'], dateRange: 'last 7 days' });
+     console.log(JSON.stringify(r, null, 2));
+   });
+   "
+   ```
+
+c) Compute relative error for each metric: `|actual - expected| / expected`. Each must be ≤ 2%.
+
+If any metric exceeds 2%, **stop**. Possible causes: filter envelope diff (e.g. dashboard implicitly filters bots; we don't), date-range edge mismatch, or operation drift. Re-capture (Task 1) and re-test before proceeding.
+
+- [ ] **Step 4b: Transcript replay — every Cody Clarity workflow we have evidence of**
+
+Acceptance criterion #11: every Cody-Clarity workflow visible in the captured transcripts must be reproducible via the new tools.
+
+Walk through each ask from the two transcripts (cart 5-way and cart 3-way) and record which new tool answers it. Save to `docs/superpowers/notes/2026-05-04-transcript-replay.md`:
+
+```markdown
+# Transcript Replay — Cody Clarity Workflows on New Tools
+
+| Transcript | Boss's ask | New tool used | ✅/❌ | Notes |
+|---|---|---|---|---|
+| cart-5way | "Review recordings, heatmaps, aggregate behavior across variants" | compare-by-variant({ tagKey: 'cro-cart-control-v2-v5' }) | ✅ | Returned 5-row table with deltas |
+| cart-5way | "Top dead-click targets per variant" | compare-by-variant + topDeadClickTargets metric | ✅ |   |
+| cart-5way | "Where is X dead-click happening?" | n/a — page-layout question, answered from code | n/a | Not a Clarity question |
+| cart-3way | "Top rage-click coordinates per variant" | compare-by-variant + rageClicks metric | ✅ |   |
+| cart-3way | "Average scroll depth per variant" | compare-by-variant + scrollDepth metric | ✅ |   |
+| cart-3way | "Session recordings of typical drop-offs in v3" | list-session-recordings({ filters: { tagKey: 'cro-cart-3way', tagValue: '3' } }) | ✅ |   |
+| ...add every distinct Clarity-ask from the transcripts |
 ```
+
+Every row must end up ✅ or n/a. If any row is ❌, that's a missing capability — file a sub-task before declaring done.
+
+- [ ] **Step 4c: NL-fallback decision (spec open question #8)**
+
+Confirm during this verification that no captured Cody Clarity workflow required the old NL parser to express a query that can't be expressed via the typed surface.
+
+In the transcript-replay note above, add a line:
+
+```markdown
+## NL-fallback assessment
+Reviewed all Clarity asks above. None require natural-language parsing
+beyond what Claude can handle by mapping a Slack message into the typed
+filter/metric parameters. Decision: NO NL-fallback tool needed for v1.
+
+If Cody fails to answer a real question via typed inputs after deploy,
+revisit by adding a minimal local NL→typed shim — DO NOT re-introduce
+the broken /mcp/dashboard/query NL parser.
+```
+
+If the assessment finds an NL-only workflow, file a follow-up task in this plan and reconsider.
 
 - [ ] **Step 5: Spot-check variant ratios**
 
@@ -2481,12 +2625,13 @@ Open https://github.com/microsoft/clarity-mcp-server/issues/new with:
 
 ## Self-Review
 
-(Performed by author after completing the plan above.)
+(Performed by author after completing the plan above; revised after spec ↔ plan diff.)
 
 **1. Spec coverage:**
 
 | Spec section | Plan tasks |
 |---|---|
+| Terms of Service review | Task 0 |
 | Architecture / file layout | Tasks 2, 3, 5, 6, 7, 12, 14 |
 | Auth model (cookie + bearer) | Tasks 5, 12 |
 | Wire-level call shape | Tasks 5, 6 |
@@ -2501,13 +2646,27 @@ Open https://github.com/microsoft/clarity-mcp-server/issues/new with:
 | Smoke test | Task 15 |
 | Risks / cookie rotation | Task 5 (auth error message), Task 16 (Pulumi secret pattern) |
 | Acceptance criteria #1-#9 | Tasks 2, 8-11, 15, 17 |
-| Acceptance criteria #10-#11 (Cody E2E) | Task 17 |
-| Acceptance criteria #12 (upstream issue) | Task 17 step 7 |
+| Acceptance criteria #10-#11 (Cody E2E + transcript replay) | Task 17 (Steps 4b, 6) |
+| Acceptance criteria #12 (upstream issue) | Task 17 Step 7 |
+| Open question #8 (NL-fallback decision) | Task 17 Step 4c |
 
 All spec sections have a corresponding task.
 
-**2. Placeholders:** None remaining. The "<replace with capture>" strings in Task 7 are intentional — they're filled from the Task 1 capture output, which is mandatory before Task 7 completes. Each is gated by the explicit "Action required" callout.
+**2. Placeholders:** None remaining. The "<replace with capture>" strings in Task 7 are intentional and gated by the explicit "Action required" callout in Task 7. Task 0's note template has fill-in-the-blanks but they're for the operator to fill, not the engineer.
 
-**3. Type consistency:** `FiltersType`, `MetricKeyType`, `DateRange` are defined in Task 4 / 6 and reused identically in Tasks 8-11. `Operation` interface defined in Task 7 used in Tasks 8-11. `QueryMetricsOutput` defined in Task 9 extended in Task 11.
+**3. Type consistency:**
+- `FiltersType`, `MetricKeyType`, `DateRange` defined in Tasks 4/6 and reused identically in Tasks 8-11.
+- `Operation` interface defined in Task 7 used in Tasks 8-11.
+- `QueryMetricsOutput` defined in Task 9 extended in Task 11.
+- `*InputShape` (plain object) and `*Input` (ZodObject) are paired exports in Tasks 9, 10, 11; Task 14 imports the shapes for SDK registration.
 
 **4. Scope:** Single subsystem (the Clarity MCP fork + Cody integration). One implementation cycle.
+
+**5. Drift fixed in this revision:**
+- Added Task 0 (ToS review) as a blocking gate.
+- Plain-object `*InputShape` exports added in Tasks 9-11; Task 14 uses them instead of `.shape`.
+- Task 9 fanout: `skip/limit/isAscending` now scoped to paginated ops only.
+- Task 9 metric→output rename has an explanatory comment.
+- Task 17 Step 4 now pins parity to a fixture file with explicit ±2% assertion.
+- Task 17 Step 4b adds transcript replay table covering both captured Cody sessions.
+- Task 17 Step 4c addresses spec open question #8 (NL fallback decision).
