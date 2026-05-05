@@ -45,10 +45,10 @@ export const MetricKey = z.enum([
   "topDeadClickTargets",
   "topClickedElements",
 ]);
-// Note: "engagement" was previously here but its `/api/v2` numbers come back in
-// an unknown unit (returns 683 vs the dashboard's ~155s for the same window).
-// Dropped from v1 until the unit decoding is confirmed. Cody's reports never
-// emphasized this metric; low value to ship a misleading number.
+// Note: an "engagement" metric (totalTime / activeTime) is exposed by the
+// `getEngagementMetrics` operation but its /api/v2 numbers come back in an
+// unknown unit that does not match the dashboard's "Active time spent" card.
+// Excluded from this enum until the unit can be decoded reliably.
 
 export type MetricKeyType = z.infer<typeof MetricKey>;
 

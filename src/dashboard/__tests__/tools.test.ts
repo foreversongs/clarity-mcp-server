@@ -19,11 +19,11 @@ describe("listCustomTags", () => {
 
   it("returns the array of tag keys", async () => {
     (postGraphQL as any).mockResolvedValueOnce({
-      data: { projectFeatures: { customTagKeys: ["cro-cart-3way", "checkout_error_code"] } },
+      data: { projectFeatures: { customTagKeys: ["test-experiment", "checkout_error_code"] } },
     });
     const { listCustomTags } = await import("../tools.js");
     const result = await listCustomTags();
-    expect(result).toEqual(["cro-cart-3way", "checkout_error_code"]);
+    expect(result).toEqual(["test-experiment", "checkout_error_code"]);
   });
 
   it("caches results across calls", async () => {
@@ -64,12 +64,12 @@ describe("queryMetrics", () => {
     });
     const { queryMetrics } = await import("../tools.js");
     await queryMetrics({
-      filters: { tagKey: "cro-cart-3way", tagValue: "1", device: ["Mobile"] },
+      filters: { tagKey: "test-experiment", tagValue: "1", device: ["Mobile"] },
       metrics: ["sessions"],
     });
     const passedVariables = (postGraphQL as any).mock.calls[0][2];
     const filterStr = passedVariables.filters as string;
-    expect(filterStr).toContain("cro-cart-3way=1");
+    expect(filterStr).toContain("test-experiment=1");
     expect(filterStr).toContain('"field":"Device"');
     expect(filterStr).toContain('"value":"Mobile"');
   });
@@ -163,12 +163,12 @@ describe("compareByVariant", () => {
         return { data: { projectFeatures: { customTagValues: ["0", "1"] } } };
       }
       // Pull tag value out of the filter envelope so we can return distinct numbers per variant.
-      const v = String(vars.filters).match(/cro-cart-3way=(\d+)/)?.[1];
+      const v = String(vars.filters).match(/test-experiment=(\d+)/)?.[1];
       const total = v === "0" ? 4080 : 1018;
       return { data: { projectFeatures: { dashboard: { sessions: { totalSessions: total, totalBotSessions: 0 } } } } };
     });
     const { compareByVariant } = await import("../tools.js");
-    const result = await compareByVariant({ tagKey: "cro-cart-3way", metrics: ["sessions"] });
+    const result = await compareByVariant({ tagKey: "test-experiment", metrics: ["sessions"] });
 
     expect(result.variants).toHaveLength(2);
     expect(result.variants[0]).toMatchObject({ value: "0", isControl: true });

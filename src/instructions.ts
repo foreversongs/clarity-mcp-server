@@ -14,7 +14,7 @@ This MCP server provides Microsoft Clarity dashboard data and documentation.
 ### Data tools (cookie auth via CLARITY_DASHBOARD_COOKIE)
 
 #### \`${TAG_DISCOVERY_TOOL}\`
-Returns the list of custom-tag *keys* defined for the project (e.g. ["cro-cart-3way", "checkout_error_code", ...]).
+Returns the list of custom-tag *keys* defined for the project (e.g. ["my_experiment", "checkout_error_code", ...]).
 Use this when you don't know which experiment tags exist for the project.
 
 #### \`${QUERY_METRICS_TOOL}\`

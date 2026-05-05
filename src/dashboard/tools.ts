@@ -96,9 +96,9 @@ export interface QueryMetricsOutput {
   dateRange: { start: string; end: string };
   /**
    * `total` is the count of real-user sessions matching the filter (bots are
-   * already excluded by the backend by default). `bot` is informational — how
-   * many additional bot sessions were filtered out for context. Cody quotes
-   * `total`; mention `bot` only if asked.
+   * already excluded by the backend by default). `bot` is informational —
+   * how many additional bot sessions were filtered out, surfaced separately
+   * so callers can mention it if asked.
    */
   sessions?: { total: number; bot: number };
   newVsReturning?: { new: number; returning: number };
@@ -106,11 +106,13 @@ export interface QueryMetricsOutput {
   topPages?: { item: string; count: number }[];
   scrollDepth?: number;
   /**
-   * Friction rates are per-page-view approximations (Luis's call 2026-05-05):
-   * `pages with X / (totalSessions × pagesPerSession)`. The denominator
-   * over-counts by the small fraction of non-filtered pages those sessions
-   * also visited; in practice the rate lands within 10–20% of Microsoft's
-   * NL parser values, which keeps Cody's reports comparable to history.
+   * Friction rates are computed as `pages with at least one event / total
+   * page views in matching sessions` — a per-page-view rate that aligns
+   * with how the dashboard's NL parser computes the same metric. The
+   * denominator (`totalSessions × pagesPerSession`) over-counts slightly
+   * because matching sessions may have visited pages outside the URL
+   * filter; the rate typically lands within ~10–20% of the dashboard's
+   * displayed value.
    */
   deadClickRate?: number;
   rageClickRate?: number;
@@ -201,20 +203,20 @@ async function fetchPagesPerSession(filtersStr: string, projectId: string): Prom
 }
 
 /**
- * Fetch scroll depth via Microsoft's NL parser at /mcp/dashboard/query. This
- * is the only path that gives us the historical per-page-view-excluding-zero
- * formula (~96% on /cart May 1-2) — `/api/v2`'s `scrollDepth` field returns
- * a session-level number that includes 0-scroll bounces (~79%). Per Luis,
- * Cody's reports should keep showing the per-scroller rate.
+ * Fetch scroll depth via the official MCP backend's NL parser
+ * (`/mcp/dashboard/query`). This is the only path that produces the
+ * per-page-view-excluding-zero formula the dashboard's Insights card uses
+ * (~96% on a typical engaged page); `/api/v2`'s `scrollDepth` field is a
+ * session-level number that includes zero-scroll bounces (~79%) and
+ * doesn't expose enough raw data to reproduce the per-scroller average.
  *
- * Limitations: NL parser doesn't accept variant filters (custom tags). When
- * `filters.tagKey` is set, fall back to /api/v2's session-level scroll depth
- * with a warning surfaced to the caller.
- *
- * Limitations 2: only URL filter is translated. Other filter dimensions are
- * passed through as English hints in the NL query but the parser may or may
- * not honor them. If exact filtering on device/country/etc. is required,
- * this returns the unfiltered rate with a warning.
+ * Limitations:
+ * - The NL parser does not accept custom-tag (variant) filters. When
+ *   `filters.tagKey` is set, the caller should fall back to /api/v2 and
+ *   surface a warning that the formula differs.
+ * - Only URL filter values are translated. Other filter dimensions
+ *   (device, country, etc.) are not passed through here; if you need
+ *   them, fall back to /api/v2 instead.
  */
 async function fetchScrollDepthViaNL(filters: FiltersType, range: DateRange): Promise<{ value: number; warning?: string }> {
   if (!CLARITY_API_TOKEN) {

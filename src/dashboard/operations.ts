@@ -62,7 +62,7 @@ export const GET_TOP_REFERRERS: Operation = {
  * observed in the capture pass — verify against live response and update
  * if the actual selection differs.
  */
-// TODO(task-9): verify `topPages` selection against live dashboard response
+// TODO: verify `topPages` selection name against a live capture before relying on this
 export const GET_TOP_PAGES: Operation = {
   operationName: "getTopMetrics",
   query: "query getTopMetrics($projectId: String!, $filters: String, $skip: Int, $isAppProject: Boolean, $limit: Int, $includePageQualityIssuesSessions: Boolean) {\n  projectFeatures(id: $projectId) {\n    id\n    dashboard(filters: $filters, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) {\n      topPages(skip: $skip, limit: $limit) {\n        item\n        count\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n",
@@ -109,8 +109,8 @@ export const GET_RAGE_CLICKS: Operation = {
 };
 
 /**
- * GET_JS_ERRORS: alias to GET_INSIGHTS_JS_ERRORS so that Task 9's
- * METRIC_TO_OP map can resolve the metric name "jsErrors" directly.
+ * GET_JS_ERRORS: alias to GET_INSIGHTS_JS_ERRORS so the consumer's
+ * metric-to-operation map can resolve "jsErrors" directly.
  */
 export const GET_JS_ERRORS: Operation = GET_INSIGHTS_JS_ERRORS;
 
@@ -123,64 +123,53 @@ export const GET_JS_ERRORS: Operation = GET_INSIGHTS_JS_ERRORS;
  * inferred from the generic `getTopMetrics` shape; the implementer probing
  * live data must verify the field name and shape before relying on this.
  */
-// TODO(task-9): capture from live dashboard
+// TODO: provisional — capture from a live dashboard render and replace
 export const GET_TOP_DEAD_CLICK_TARGETS: Operation = {
   operationName: "getTopMetrics",
-  query: "query getTopMetrics($projectId: String!, $filters: String, $skip: Int, $isAppProject: Boolean, $limit: Int, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — not yet observed live, capture in Task 9's probe step */ projectFeatures(id: $projectId) { id dashboard(filters: $filters, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { topDeadClickTargets(skip: $skip, limit: $limit) { item count __typename } __typename } __typename } }",
+  query: "query getTopMetrics($projectId: String!, $filters: String, $skip: Int, $isAppProject: Boolean, $limit: Int, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — capture from a live dashboard render and replace */projectFeatures(id: $projectId) { id dashboard(filters: $filters, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { topDeadClickTargets(skip: $skip, limit: $limit) { item count __typename } __typename } __typename } }",
   responseExtractPath: "data.projectFeatures.dashboard.topDeadClickTargets",
 };
 
 /**
  * GET_TOP_CLICKED_ELEMENTS: provisional, see note above.
  */
-// TODO(task-9): capture from live dashboard
+// TODO: provisional — capture from a live dashboard render and replace
 export const GET_TOP_CLICKED_ELEMENTS: Operation = {
   operationName: "getTopMetrics",
-  query: "query getTopMetrics($projectId: String!, $filters: String, $skip: Int, $isAppProject: Boolean, $limit: Int, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — not yet observed live, capture in Task 9's probe step */ projectFeatures(id: $projectId) { id dashboard(filters: $filters, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { topClickedElements(skip: $skip, limit: $limit) { item count __typename } __typename } __typename } }",
+  query: "query getTopMetrics($projectId: String!, $filters: String, $skip: Int, $isAppProject: Boolean, $limit: Int, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — capture from a live dashboard render and replace */projectFeatures(id: $projectId) { id dashboard(filters: $filters, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { topClickedElements(skip: $skip, limit: $limit) { item count __typename } __typename } __typename } }",
   responseExtractPath: "data.projectFeatures.dashboard.topClickedElements",
 };
 
 /**
- * LIST_CUSTOM_TAG_KEYS: per `operations.json._stillToCapture`, the dashboard
- * populates the tag-key dropdown without firing a fresh GraphQL call (likely
- * cached or part of getProjectSummary metadata). Provisional shape until the
- * real operation is captured live: assume a dedicated `customTagKeys` field on
- * `projectFeatures` returning an array of strings. Tool layer (`listCustomTags`)
- * is structured so swapping the operation later is a one-file change.
+ * LIST_CUSTOM_TAG_KEYS: provisional. The dashboard populates its tag-key
+ * dropdown without firing a fresh GraphQL call in some sessions (likely
+ * cached metadata). Field name and operation name are educated guesses;
+ * verify against a live capture and replace if they differ.
  */
-// TODO(task-8): capture from live dashboard and replace this stub
 export const LIST_CUSTOM_TAG_KEYS: Operation = {
   operationName: "listCustomTagKeys",
-  query: "query listCustomTagKeys($projectId: String!) { /* PROVISIONAL — not yet observed live; field name and operation name are educated guesses based on the dashboard's tag-key dropdown. Replace once captured. */ projectFeatures(id: $projectId) { id customTagKeys __typename } }",
+  query: "query listCustomTagKeys($projectId: String!) { /* PROVISIONAL — verify via live capture */ projectFeatures(id: $projectId) { id customTagKeys __typename } }",
   responseExtractPath: "data.projectFeatures.customTagKeys",
 };
 
 /**
- * LIST_CUSTOM_TAG_VALUES: provisional placeholder. Task 11 implementer
- * should capture the actual operation when probing live data. Field name
- * `customTagValues` mirrors the `customTagKeys` shape in LIST_CUSTOM_TAG_KEYS
- * — both are educated guesses parallel to the dashboard's tag dropdowns.
+ * LIST_CUSTOM_TAG_VALUES: provisional. Mirrors LIST_CUSTOM_TAG_KEYS shape;
+ * verify via live capture and replace if it differs.
  */
-// TODO(task-11): capture from live dashboard
 export const LIST_CUSTOM_TAG_VALUES: Operation = {
   operationName: "listCustomTagValues",
-  query: "query listCustomTagValues($projectId: String!, $tagKey: String!) { /* PROVISIONAL — not yet observed live; field name and operation name are educated guesses parallel to listCustomTagKeys. Replace once captured. */ projectFeatures(id: $projectId) { id customTagValues(tagKey: $tagKey) __typename } }",
+  query: "query listCustomTagValues($projectId: String!, $tagKey: String!) { /* PROVISIONAL — verify via live capture */ projectFeatures(id: $projectId) { id customTagValues(tagKey: $tagKey) __typename } }",
   responseExtractPath: "data.projectFeatures.customTagValues",
 };
 
 /**
- * GET_RECORDINGS: per `operations.json._stillToCapture`, the recordings-list
- * query was not captured because the recordings page redirected to the
- * dashboard during the capture pass. Task 10 implementer should capture
- * this just-in-time by clicking "Go to recordings" from a dashboard card.
- *
- * `responseExtractPath` targets `recordings.items` to match the dashboard
- * contract (paginated list under `items`); the tool layer normalizes each
- * row's fields.
+ * GET_RECORDINGS: provisional. The recordings-list query is fired by the
+ * dashboard's Recordings page; capture from a live render and replace.
+ * `responseExtractPath` targets `recordings.items` based on the dashboard
+ * pagination convention.
  */
-// TODO(task-10): capture from live dashboard
 export const GET_RECORDINGS: Operation = {
   operationName: "getRecordings",
-  query: "query getRecordings($projectId: String!, $filters: String, $sortField: String, $limit: Int, $isAppProject: Boolean, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — not yet observed live, capture in Task 10's probe step */ projectFeatures(id: $projectId) { id recordings(filters: $filters, sortField: $sortField, limit: $limit, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { items { link timestamp totalDuration activeDuration pagesCount sessionClickCount country device url __typename } __typename } __typename } }",
+  query: "query getRecordings($projectId: String!, $filters: String, $sortField: String, $limit: Int, $isAppProject: Boolean, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — verify via live capture */ projectFeatures(id: $projectId) { id recordings(filters: $filters, sortField: $sortField, limit: $limit, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { items { link timestamp totalDuration activeDuration pagesCount sessionClickCount country device url __typename } __typename } __typename } }",
   responseExtractPath: "data.projectFeatures.recordings.items",
 };

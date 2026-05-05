@@ -23,19 +23,17 @@ export function buildFilterEnvelope(filters: FiltersType, dateRange: DateRange):
       field: "minEnqueuedTimestamp",
       dataType: "Number",
       operator: "Range",
-      // Naive ET strings (no `Z`, no offset). The backend interprets these as
-      // ET local time and matches its internal storage; UTC strings introduce
-      // a ~2.6% session-count gap (probe finding 2026-05-04).
+      // Naive ET strings (no `Z`, no offset). The backend bucket-aligns to ET
+      // local time and ISO-Z strings produce slightly off counts.
       value: { min: formatNaiveET(dateRange.start), max: formatNaiveET(dateRange.end) },
     },
   ];
 
   if (filters.url?.length) {
-    // Captured dashboard URL filter: { field: "Url", dataType: "String" }.
-    // Note "Equals" is matched against a normalized path on the backend, while
-    // "Contains" matches the full URL — for typical /cart-style filtering we
-    // map the user-facing "contains" → "Contains" which works against full
-    // URLs with query strings.
+    // Dashboard wire format: field "Url", dataType "String". The backend's
+    // "Equals" operator matches a normalized path; "Contains" matches the
+    // full URL string (more useful for path-prefix style filtering against
+    // URLs with query parameters).
     out.push(orGroup(filters.url.map((u) => ({
       operator: URL_OP_MAP[u.operator ?? "contains"] ?? "Contains",
       field: "Url", dataType: "String", value: u.value, invert: false,

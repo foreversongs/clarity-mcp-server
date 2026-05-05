@@ -14,7 +14,7 @@ describe("buildFilterEnvelope", () => {
   });
 
   it("translates a tagKey+tagValue into a Variables Contains filter", () => {
-    const env = buildFilterEnvelope({ tagKey: "cro-cart-3way", tagValue: "1" }, dateRange);
+    const env = buildFilterEnvelope({ tagKey: "test-experiment", tagValue: "1" }, dateRange);
     const parsed = JSON.parse(env);
     const orGroup = parsed.filters.find((f: any) => f.operator === "Or");
     expect(orGroup).toBeTruthy();
@@ -22,7 +22,7 @@ describe("buildFilterEnvelope", () => {
       operator: "Contains",
       field: "Variables",
       dataType: "Other",
-      value: "cro-cart-3way=1",
+      value: "test-experiment=1",
       invert: false,
     });
   });

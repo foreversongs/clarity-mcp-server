@@ -7,10 +7,9 @@ export interface DateRange {
 
 /**
  * Format a UTC Date as a naive ET wall-clock string ("YYYY-MM-DDTHH:mm:ss.sss",
- * no timezone designator). The /api/v2 backend interprets timezone-naive
- * timestamps as ET local time directly, which closes a ~2.6% session-count gap
- * vs sending UTC `Z` strings (probe finding 2026-05-04). Always use this in the
- * filter envelope's `minEnqueuedTimestamp` Range value.
+ * no timezone designator). The dashboard's filter envelope expects this format
+ * for `minEnqueuedTimestamp` Range values; sending ISO-Z strings produces
+ * slightly off counts because of how the backend bucket-aligns timestamps.
  */
 export function formatNaiveET(d: Date): string {
   const fmt = new Intl.DateTimeFormat("en-CA", {
