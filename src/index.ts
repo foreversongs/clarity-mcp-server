@@ -4,116 +4,134 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import pkg from "../package.json" with { type: "json" };
 
 import {
-  ANALYTICS_DASHBOARD_DESCRIPTION,
-  ANALYTICS_DASHBOARD_TOOL,
   CLARITY_API_TOKEN,
+  CLARITY_DASHBOARD_COOKIE,
+  CLARITY_PROJECT_ID,
+  COMPARE_BY_VARIANT_DESCRIPTION,
+  COMPARE_BY_VARIANT_TOOL,
   DOCUMENTATION_DESCRIPTION,
   DOCUMENTATION_TOOL,
-  SESSION_RECORDINGS_DESCRIPTION,
-  SESSION_RECORDINGS_TOOL
+  NEW_SESSION_RECORDINGS_DESCRIPTION,
+  QUERY_METRICS_DESCRIPTION,
+  QUERY_METRICS_TOOL,
+  SESSION_RECORDINGS_TOOL,
+  TAG_DISCOVERY_DESCRIPTION,
+  TAG_DISCOVERY_TOOL,
 } from "./constants.js";
+import { SYSTEM_INSTRUCTIONS_PROMPT } from "./instructions.js";
 import {
-  SYSTEM_INSTRUCTIONS_PROMPT
-} from "./instructions.js";
-import {
-  listSessionRecordingsAsync,
-  queryAnalyticsDashboardAsync,
-  queryDocumentationAsync
-} from "./tools.js";
-import {
-  ListRequest,
-  SearchRequest,
-} from "./types.js";
+  CompareByVariantInputShape,
+  ListRecordingsInputShape,
+  QueryMetricsInputShape,
+  compareByVariant,
+  listCustomTags,
+  listSessionRecordings,
+  queryMetrics,
+} from "./dashboard/tools.js";
+import { queryDocumentationAsync } from "./docs-tool.js";
+import { z } from "zod";
 
-// Create server instance
+const DocsInput = { query: z.string().describe("Natural-language question about Microsoft Clarity documentation.") };
+
 const server = new McpServer(
   {
     name: pkg.name,
     version: pkg.version,
   },
   {
-    capabilities: {
-      resources: {},
-      tools: {}
-    },
+    capabilities: { resources: {}, tools: {} },
     instructions: SYSTEM_INSTRUCTIONS_PROMPT,
-  }
+  },
 );
 
-// Register the query-analytics-data tool
+// === Cookie-authenticated dashboard tools ===
+
 server.tool(
-  ANALYTICS_DASHBOARD_TOOL,             /* Name */
-  ANALYTICS_DASHBOARD_DESCRIPTION,      /* Description */
-  SearchRequest,                        /* Parameter Schema */
-  {                                     /* Metadata & Annotations */
-    title: "Query Analytics Dashboard",
-    readOnlyHint: true,
-    destructiveHint: false,
-    openWorldHint: false
-  },
-  async ({ query }) => {
-    return await queryAnalyticsDashboardAsync(query, Intl.DateTimeFormat().resolvedOptions().timeZone);
-  }
-);
-
-// Register the session-recordings tool
-server.tool(
-  SESSION_RECORDINGS_TOOL,              /* Name */
-  SESSION_RECORDINGS_DESCRIPTION,       /* Description */
-  ListRequest,                          /* Parameter Schema */
-  {                                     /* Metadata & Annotations */
-    title: "List Session Recordings",
-    readOnlyHint: true,
-    destructiveHint: false,
-    openWorldHint: false
-  },
-  async ({ filters, sortBy, count }) => {
-    const now = new Date().toISOString();
-
-    // Calculate end as now, start as now - numOfDays
-    const endDate = new Date(filters?.date?.end || now);
-    const startDate = new Date(filters?.date?.start || now);
-
-    if (!filters?.date?.start) {
-      startDate.setDate(endDate.getDate() - 2);
+  TAG_DISCOVERY_TOOL,
+  TAG_DISCOVERY_DESCRIPTION,
+  {},
+  { title: "List Custom Tags", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  async () => {
+    try {
+      const tags = await listCustomTags();
+      return { content: [{ type: "text", text: JSON.stringify(tags, null, 2) }] };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { content: [{ type: "text", text: msg }] };
     }
-
-    return await listSessionRecordingsAsync(startDate, endDate, filters, sortBy, count);
-  }
-);
-
-// Register the query-documentation-resources tool
-server.tool(
-  DOCUMENTATION_TOOL,                   /* Name */
-  DOCUMENTATION_DESCRIPTION,            /* Description */
-  SearchRequest,                        /* Parameter Schema */
-  {                                     /* Metadata & Annotations */
-    title: "Query Documentation Resources",
-    readOnlyHint: true,
-    destructiveHint: false,
-    openWorldHint: false
   },
-  async ({ query }) => {
-    return await queryDocumentationAsync(query);
-  }
 );
 
-// Main function
-async function main() {
-  // Log configuration status
-  if (CLARITY_API_TOKEN) {
-    console.error("Clarity API token configured via environment/command-line");
-  } else {
-    console.error("No Clarity API token configured, it must be provided with each request");
-  }
+server.tool(
+  QUERY_METRICS_TOOL,
+  QUERY_METRICS_DESCRIPTION,
+  QueryMetricsInputShape,
+  { title: "Query Clarity Metrics", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  async (input) => {
+    try {
+      const result = await queryMetrics(input);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { content: [{ type: "text", text: msg }] };
+    }
+  },
+);
 
+server.tool(
+  SESSION_RECORDINGS_TOOL,
+  NEW_SESSION_RECORDINGS_DESCRIPTION,
+  ListRecordingsInputShape,
+  { title: "List Session Recordings", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  async (input) => {
+    try {
+      const result = await listSessionRecordings(input);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { content: [{ type: "text", text: msg }] };
+    }
+  },
+);
+
+server.tool(
+  COMPARE_BY_VARIANT_TOOL,
+  COMPARE_BY_VARIANT_DESCRIPTION,
+  CompareByVariantInputShape,
+  { title: "Compare by Variant", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  async (input) => {
+    try {
+      const result = await compareByVariant(input);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { content: [{ type: "text", text: msg }] };
+    }
+  },
+);
+
+// === Bearer-authenticated documentation tool ===
+
+server.tool(
+  DOCUMENTATION_TOOL,
+  DOCUMENTATION_DESCRIPTION,
+  DocsInput,
+  { title: "Query Clarity Documentation", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  async ({ query }) => {
+    return (await queryDocumentationAsync(query)) as { content: { type: "text"; text: string }[] };
+  },
+);
+
+async function main() {
+  console.error(`Clarity MCP Server (fork) starting...`);
+  console.error(`  CLARITY_API_TOKEN:        ${CLARITY_API_TOKEN ? "configured" : "MISSING (docs tool will fail)"}`);
+  console.error(`  CLARITY_DASHBOARD_COOKIE: ${CLARITY_DASHBOARD_COOKIE ? "configured" : "MISSING (data tools will fail)"}`);
+  console.error(`  CLARITY_PROJECT_ID:       ${CLARITY_PROJECT_ID ?? "MISSING (data tools will fail)"}`);
   const transport = new StdioServerTransport();
   await server.connect(transport);
-
-  console.error("Microsoft Clarity Data Export MCP Server running on stdio...");
+  console.error("Clarity MCP Server (fork) running on stdio.");
 }
 
-// Run the server
 main().catch((error) => {
   console.error("Fatal error in main():", error);
   process.exit(1);
