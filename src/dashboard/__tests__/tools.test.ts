@@ -54,7 +54,7 @@ describe("queryMetrics", () => {
     const { queryMetrics } = await import("../tools.js");
     const result = await queryMetrics({ metrics: ["sessions"] });
     expect(result.sessions).toEqual({ total: 100, bot: 5 });
-    expect(result.engagement).toBeUndefined();
+    expect(result.newVsReturning).toBeUndefined();
     expect(postGraphQL).toHaveBeenCalledTimes(1);
   });
 
@@ -77,14 +77,14 @@ describe("queryMetrics", () => {
   it("collects partial results when one sub-query fails", async () => {
     (postGraphQL as any).mockImplementation(async (op: string) => {
       if (op === "getSessionsInfo") return { data: { projectFeatures: { dashboard: { sessions: { totalSessions: 1, totalBotSessions: 0 } } } } };
-      if (op === "getEngagementMetrics") throw new Error("kaboom");
+      if (op === "getNewAndReturning") throw new Error("kaboom");
       throw new Error(`Unexpected op: ${op}`);
     });
     const { queryMetrics } = await import("../tools.js");
-    const result = await queryMetrics({ metrics: ["sessions", "engagement"] });
+    const result = await queryMetrics({ metrics: ["sessions", "newVsReturning"] });
     expect(result.sessions).toEqual({ total: 1, bot: 0 });
-    expect(result.engagement).toBeUndefined();
-    expect(result._warnings).toContain("engagement: kaboom");
+    expect(result.newVsReturning).toBeUndefined();
+    expect(result._warnings).toContain("newVsReturning: kaboom");
   });
 
   it("emits a shape-drift warning when extract path misses on a 200 response", async () => {

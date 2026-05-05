@@ -1,5 +1,5 @@
 import type { FiltersType } from "./types.js";
-import type { DateRange } from "./date-range.js";
+import { formatNaiveET, type DateRange } from "./date-range.js";
 
 const URL_OP_MAP: Record<string, string> = {
   contains: "Contains",
@@ -23,14 +23,22 @@ export function buildFilterEnvelope(filters: FiltersType, dateRange: DateRange):
       field: "minEnqueuedTimestamp",
       dataType: "Number",
       operator: "Range",
-      value: { min: dateRange.start.toISOString(), max: dateRange.end.toISOString() },
+      // Naive ET strings (no `Z`, no offset). The backend interprets these as
+      // ET local time and matches its internal storage; UTC strings introduce
+      // a ~2.6% session-count gap (probe finding 2026-05-04).
+      value: { min: formatNaiveET(dateRange.start), max: formatNaiveET(dateRange.end) },
     },
   ];
 
   if (filters.url?.length) {
+    // Captured dashboard URL filter: { field: "Url", dataType: "String" }.
+    // Note "Equals" is matched against a normalized path on the backend, while
+    // "Contains" matches the full URL — for typical /cart-style filtering we
+    // map the user-facing "contains" → "Contains" which works against full
+    // URLs with query strings.
     out.push(orGroup(filters.url.map((u) => ({
       operator: URL_OP_MAP[u.operator ?? "contains"] ?? "Contains",
-      field: "URL", dataType: "Other", value: u.value, invert: false,
+      field: "Url", dataType: "String", value: u.value, invert: false,
     }))));
   }
   if (filters.device?.length) {

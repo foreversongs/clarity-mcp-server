@@ -38,11 +38,12 @@ describe("buildFilterEnvelope", () => {
   it("translates a url filter with custom operator", () => {
     const env = buildFilterEnvelope({ url: [{ value: "/cart", operator: "contains" }] }, dateRange);
     const parsed = JSON.parse(env);
-    const orGroup = parsed.filters.find((f: any) => f.operator === "Or" && f.filters[0].field === "URL");
+    // Dashboard captured shape: field "Url" + dataType "String" (not "URL"/"Other")
+    const orGroup = parsed.filters.find((f: any) => f.operator === "Or" && f.filters[0].field === "Url");
     expect(orGroup.filters[0]).toEqual({
       operator: "Contains",
-      field: "URL",
-      dataType: "Other",
+      field: "Url",
+      dataType: "String",
       value: "/cart",
       invert: false,
     });

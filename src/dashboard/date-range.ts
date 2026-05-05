@@ -6,6 +6,28 @@ export interface DateRange {
 }
 
 /**
+ * Format a UTC Date as a naive ET wall-clock string ("YYYY-MM-DDTHH:mm:ss.sss",
+ * no timezone designator). The /api/v2 backend interprets timezone-naive
+ * timestamps as ET local time directly, which closes a ~2.6% session-count gap
+ * vs sending UTC `Z` strings (probe finding 2026-05-04). Always use this in the
+ * filter envelope's `minEnqueuedTimestamp` Range value.
+ */
+export function formatNaiveET(d: Date): string {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    fractionalSecondDigits: 3, hour12: false,
+  });
+  const parts = fmt.formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)!.value;
+  // en-CA hour can be "24" at midnight; normalize to "00".
+  const hour = get("hour") === "24" ? "00" : get("hour");
+  const ms = get("fractionalSecond") ?? "000";
+  return `${get("year")}-${get("month")}-${get("day")}T${hour}:${get("minute")}:${get("second")}.${ms}`;
+}
+
+/**
  * Convert "YYYY-MM-DD" + "00:00" or "23:59:59.999" in TZ to a UTC Date.
  * Uses Intl.DateTimeFormat to discover the offset for the given date in TZ.
  */

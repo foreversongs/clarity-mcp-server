@@ -35,7 +35,6 @@ export type FiltersType = z.infer<typeof Filters>;
 
 export const MetricKey = z.enum([
   "sessions",
-  "engagement",
   "newVsReturning",
   "topReferrers",
   "topPages",
@@ -46,6 +45,10 @@ export const MetricKey = z.enum([
   "topDeadClickTargets",
   "topClickedElements",
 ]);
+// Note: "engagement" was previously here but its `/api/v2` numbers come back in
+// an unknown unit (returns 683 vs the dashboard's ~155s for the same window).
+// Dropped from v1 until the unit decoding is confirmed. Cody's reports never
+// emphasized this metric; low value to ship a misleading number.
 
 export type MetricKeyType = z.infer<typeof MetricKey>;
 
