@@ -148,3 +148,33 @@ describe("listSessionRecordings", () => {
     expect(passedVars.sortField).toBe("SessionDuration_DESC");
   });
 });
+
+describe("compareByVariant", () => {
+  beforeEach(async () => {
+    process.env.CLARITY_PROJECT_ID = "test-project";
+    vi.resetAllMocks();
+    const tools = await import("../tools.js");
+    tools.__resetCacheForTests();
+  });
+
+  it("auto-discovers values, fans out, and computes deltas vs control", async () => {
+    (postGraphQL as any).mockImplementation(async (op: string, _q: string, vars: any) => {
+      if (op === "listCustomTagValues") {
+        return { data: { projectFeatures: { customTagValues: ["0", "1"] } } };
+      }
+      // Pull tag value out of the filter envelope so we can return distinct numbers per variant.
+      const v = String(vars.filters).match(/cro-cart-3way=(\d+)/)?.[1];
+      const total = v === "0" ? 4080 : 1018;
+      return { data: { projectFeatures: { dashboard: { sessions: { totalSessions: total, totalBotSessions: 0 } } } } };
+    });
+    const { compareByVariant } = await import("../tools.js");
+    const result = await compareByVariant({ tagKey: "cro-cart-3way", metrics: ["sessions"] });
+
+    expect(result.variants).toHaveLength(2);
+    expect(result.variants[0]).toMatchObject({ value: "0", isControl: true });
+    expect(result.variants[0]?.sessions).toEqual({ total: 4080, bot: 0 });
+    expect(result.variants[1]).toMatchObject({ value: "1", isControl: false });
+    expect(result.variants[1]?.sessions).toEqual({ total: 1018, bot: 0 });
+    expect(result.variants[1]?.deltas?.["sessions.total"]).toBe("-75.0%");
+  });
+});

@@ -157,13 +157,15 @@ export const LIST_CUSTOM_TAG_KEYS: Operation = {
 
 /**
  * LIST_CUSTOM_TAG_VALUES: provisional placeholder. Task 11 implementer
- * should capture the actual operation when probing live data.
+ * should capture the actual operation when probing live data. Field name
+ * `customTagValues` mirrors the `customTagKeys` shape in LIST_CUSTOM_TAG_KEYS
+ * — both are educated guesses parallel to the dashboard's tag dropdowns.
  */
 // TODO(task-11): capture from live dashboard
 export const LIST_CUSTOM_TAG_VALUES: Operation = {
-  operationName: "getFilterOptions",
-  query: "query getFilterOptions($projectId: String!, $filter: String!, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — not yet observed live, capture in Task 11's probe step */ projectFeatures(id: $projectId) { id filterOptions(serializedFilter: $filter, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { Variables __typename } __typename } }",
-  responseExtractPath: "data.projectFeatures.filterOptions.Variables",
+  operationName: "listCustomTagValues",
+  query: "query listCustomTagValues($projectId: String!, $tagKey: String!) { /* PROVISIONAL — not yet observed live; field name and operation name are educated guesses parallel to listCustomTagKeys. Replace once captured. */ projectFeatures(id: $projectId) { id customTagValues(tagKey: $tagKey) __typename } }",
+  responseExtractPath: "data.projectFeatures.customTagValues",
 };
 
 /**

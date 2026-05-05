@@ -2,6 +2,7 @@ import { z } from "zod";
 import { postGraphQL, logExtract } from "./client.js";
 import {
   LIST_CUSTOM_TAG_KEYS,
+  LIST_CUSTOM_TAG_VALUES,
   GET_SESSIONS_INFO,
   GET_ENGAGEMENT_METRICS,
   GET_NEW_AND_RETURNING,
@@ -90,7 +91,7 @@ export const QueryMetricsInput = z.object(QueryMetricsInputShape);
 
 export type QueryMetricsInputType = z.infer<typeof QueryMetricsInput>;
 
-interface QueryMetricsOutput {
+export interface QueryMetricsOutput {
   filters?: FiltersType;
   dateRange: { start: string; end: string };
   sessions?: { total: number; bot: number };
@@ -304,5 +305,113 @@ export async function listSessionRecordings(input: ListRecordingsInputType): Pro
     dateRange: { start: range.start.toISOString(), end: range.end.toISOString() },
     count: list.length,
     recordings: list,
+  };
+}
+
+export const CompareByVariantInputShape = {
+  tagKey: z.string(),
+  additionalFilters: Filters.omit({ tagKey: true, tagValue: true }).optional(),
+  metrics: z.array(MetricKey).optional(),
+  dateRange: z.string().optional(),
+};
+
+export const CompareByVariantInput = z.object(CompareByVariantInputShape);
+
+export type CompareByVariantInputType = z.infer<typeof CompareByVariantInput>;
+
+interface VariantRow extends QueryMetricsOutput {
+  value: string;
+  isControl: boolean;
+  deltas?: Record<string, string>;
+}
+
+interface CompareByVariantOutput {
+  tagKey: string;
+  additionalFilters: FiltersType;
+  dateRange: { start: string; end: string };
+  variants: VariantRow[];
+}
+
+async function discoverValues(tagKey: string): Promise<string[]> {
+  const response = await postGraphQL(
+    LIST_CUSTOM_TAG_VALUES.operationName,
+    LIST_CUSTOM_TAG_VALUES.query,
+    { projectId: getProjectId(), tagKey },
+  );
+  const raw = extractWithLog(LIST_CUSTOM_TAG_VALUES.operationName, response, LIST_CUSTOM_TAG_VALUES.responseExtractPath);
+  if (!Array.isArray(raw)) {
+    throw new Error(`response shape drift: operation ${LIST_CUSTOM_TAG_VALUES.operationName} did not return array at expected path '${LIST_CUSTOM_TAG_VALUES.responseExtractPath}' for tagKey=${tagKey}`);
+  }
+  // Sort: literal "control" sentinel first; then numerics ascending; then
+  // lexicographic. Index 0 becomes the implicit control variant for delta
+  // computation downstream.
+  return (raw as string[]).slice().sort((a, b) => {
+    if (a === "control") return -1;
+    if (b === "control") return 1;
+    const an = Number(a), bn = Number(b);
+    if (!Number.isNaN(an) && !Number.isNaN(bn)) return an - bn;
+    return a.localeCompare(b);
+  });
+}
+
+/**
+ * Recursively flatten a metrics object into dotted keys -> numbers. Used to
+ * align matching metric paths between control and variant rows for delta
+ * computation. Non-numeric leaves (arrays, strings) are dropped — deltas only
+ * make sense for scalars.
+ */
+function flatten(obj: unknown, prefix = ""): Record<string, number> {
+  if (obj === null || obj === undefined) return {};
+  if (typeof obj === "number") return { [prefix.replace(/\.$/, "")]: obj };
+  if (typeof obj !== "object" || Array.isArray(obj)) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    Object.assign(out, flatten(v, prefix + k + "."));
+  }
+  return out;
+}
+
+function computeDeltas(variant: QueryMetricsOutput, control: QueryMetricsOutput): Record<string, string> {
+  // Strip envelope fields (warnings/filters/dateRange) before flattening so
+  // they don't pollute the delta key set.
+  const flatV = flatten({ ...variant, _warnings: undefined, filters: undefined, dateRange: undefined });
+  const flatC = flatten({ ...control,  _warnings: undefined, filters: undefined, dateRange: undefined });
+  const out: Record<string, string> = {};
+  for (const key of Object.keys(flatV)) {
+    const c = flatC[key];
+    const v = flatV[key];
+    if (typeof c !== "number" || c === 0) continue;
+    if (typeof v !== "number") continue;
+    const delta = ((v - c) / c) * 100;
+    out[key] = `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}%`;
+  }
+  return out;
+}
+
+export async function compareByVariant(input: CompareByVariantInputType): Promise<CompareByVariantOutput> {
+  const parsed = CompareByVariantInput.parse(input);
+  const values = await discoverValues(parsed.tagKey);
+  const range = parseDateRange(parsed.dateRange);
+
+  const variantResults: VariantRow[] = await Promise.all(
+    values.map(async (value, idx): Promise<VariantRow> => {
+      const merged: FiltersType = { ...(parsed.additionalFilters ?? {}), tagKey: parsed.tagKey, tagValue: value };
+      const metrics = await queryMetrics({ filters: merged, metrics: parsed.metrics, dateRange: parsed.dateRange });
+      return { value, isControl: idx === 0, ...metrics };
+    }),
+  );
+
+  const control = variantResults[0];
+  if (control) {
+    for (let i = 1; i < variantResults.length; i++) {
+      variantResults[i]!.deltas = computeDeltas(variantResults[i]!, control);
+    }
+  }
+
+  return {
+    tagKey: parsed.tagKey,
+    additionalFilters: parsed.additionalFilters ?? {},
+    dateRange: { start: range.start.toISOString(), end: range.end.toISOString() },
+    variants: variantResults,
   };
 }
