@@ -5,7 +5,7 @@ export const getConfigValue = (name: string, fallback?: string): string | undefi
   // Check command line args first (format: --name=value or --name value)
   const argIndex = process.argv.findIndex((arg) => arg.startsWith(`--${name}`));
   if (argIndex !== -1) {
-    const arg = process.argv[argIndex];
+    const arg = process.argv[argIndex]!;
     if (arg.includes("=")) {
       return arg.split("=")[1];
     }
