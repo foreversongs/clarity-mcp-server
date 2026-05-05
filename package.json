@@ -12,8 +12,14 @@
     "url": "https://github.com/angelrojasm/clarity-mcp-server"
   },
   "keywords": [
-    "clarity", "behavior-analytics-tools", "session-recordings",
-    "analytics", "mcp", "model-context-protocol", "ai", "agents"
+    "clarity",
+    "behavior-analytics-tools",
+    "session-recordings",
+    "analytics",
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "agents"
   ],
   "bin": {
     "clarity-mcp-server": "./dist/cli.js"
@@ -33,6 +39,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.23",
+    "dotenv": "^17.4.2",
     "typescript": "^5.9.3",
     "vitest": "^2.1.8"
   }
