@@ -101,3 +101,50 @@ describe("queryMetrics", () => {
     expect(result._warnings?.[0]).toMatch(/response shape drift.*getSessionsInfo/);
   });
 });
+
+describe("listSessionRecordings", () => {
+  beforeEach(async () => {
+    process.env.CLARITY_PROJECT_ID = "test-project";
+    vi.resetAllMocks();
+    const tools = await import("../tools.js");
+    tools.__resetCacheForTests();
+  });
+
+  it("returns the recordings array with normalized fields", async () => {
+    (postGraphQL as any).mockResolvedValueOnce({
+      data: {
+        projectFeatures: {
+          recordings: {
+            items: [{
+              link: "https://clarity.microsoft.com/player/p1/u1/s1",
+              timestamp: "2026-04-30 18:22:14",
+              totalDuration: "00:04:12",
+              activeDuration: "00:02:48",
+              pagesCount: 5,
+              sessionClickCount: 22,
+              country: "United States",
+              device: "Mobile",
+            }],
+          },
+        },
+      },
+    });
+    const { listSessionRecordings } = await import("../tools.js");
+    const result = await listSessionRecordings({});
+    expect(result.recordings).toHaveLength(1);
+    expect(result.recordings[0]?.playerUrl).toBe("https://clarity.microsoft.com/player/p1/u1/s1");
+    expect(result.recordings[0]?.pages).toBe(5);
+    expect(result.recordings[0]?.clickCount).toBe(22);
+  });
+
+  it("passes count and sortBy through to the GraphQL variables", async () => {
+    (postGraphQL as any).mockResolvedValueOnce({
+      data: { projectFeatures: { recordings: { items: [] } } },
+    });
+    const { listSessionRecordings } = await import("../tools.js");
+    await listSessionRecordings({ count: 50, sortBy: "longest" });
+    const passedVars = (postGraphQL as any).mock.calls[0][2];
+    expect(passedVars.limit).toBe(50);
+    expect(passedVars.sortField).toBe("SessionDuration_DESC");
+  });
+});

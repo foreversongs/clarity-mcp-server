@@ -171,10 +171,14 @@ export const LIST_CUSTOM_TAG_VALUES: Operation = {
  * query was not captured because the recordings page redirected to the
  * dashboard during the capture pass. Task 10 implementer should capture
  * this just-in-time by clicking "Go to recordings" from a dashboard card.
+ *
+ * `responseExtractPath` targets `recordings.items` to match the dashboard
+ * contract (paginated list under `items`); the tool layer normalizes each
+ * row's fields.
  */
 // TODO(task-10): capture from live dashboard
 export const GET_RECORDINGS: Operation = {
   operationName: "getRecordings",
-  query: "query getRecordings($projectId: String!, $filters: String, $skip: Int, $limit: Int, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — not yet observed live, capture in Task 10's probe step */ projectFeatures(id: $projectId) { id recordings(filters: $filters, skip: $skip, limit: $limit, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { sessionId duration startTime url __typename } __typename } }",
-  responseExtractPath: "data.projectFeatures.recordings",
+  query: "query getRecordings($projectId: String!, $filters: String, $sortField: String, $limit: Int, $isAppProject: Boolean, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — not yet observed live, capture in Task 10's probe step */ projectFeatures(id: $projectId) { id recordings(filters: $filters, sortField: $sortField, limit: $limit, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { items { link timestamp totalDuration activeDuration pagesCount sessionClickCount country device url __typename } __typename } __typename } }",
+  responseExtractPath: "data.projectFeatures.recordings.items",
 };

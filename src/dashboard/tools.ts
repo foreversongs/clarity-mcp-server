@@ -13,6 +13,7 @@ import {
   GET_JS_ERRORS,
   GET_TOP_DEAD_CLICK_TARGETS,
   GET_TOP_CLICKED_ELEMENTS,
+  GET_RECORDINGS,
   type Operation,
 } from "./operations.js";
 import {
@@ -217,4 +218,91 @@ export async function queryMetrics(input: QueryMetricsInputType): Promise<QueryM
 
   if (warnings.length) out._warnings = warnings;
   return out;
+}
+
+export const ListRecordingsInputShape = {
+  filters: Filters.optional(),
+  count: z.number().int().min(1).max(250).default(10),
+  sortBy: z.enum(["newest", "oldest", "longest", "shortest", "most-clicks", "most-pages"]).default("newest"),
+  dateRange: z.string().optional(),
+};
+
+export const ListRecordingsInput = z.object(ListRecordingsInputShape);
+
+// Use `z.input` here (not `z.infer`/`z.output`) so callers may omit fields
+// that have schema-level defaults — defaults are applied by `parse()` inside
+// the function, not enforced on the call signature.
+export type ListRecordingsInputType = z.input<typeof ListRecordingsInput>;
+type ListRecordingsParsed = z.output<typeof ListRecordingsInput>;
+
+const SORT_MAP: Record<ListRecordingsParsed["sortBy"], string> = {
+  newest: "SessionStart_DESC",
+  oldest: "SessionStart_ASC",
+  longest: "SessionDuration_DESC",
+  shortest: "SessionDuration_ASC",
+  "most-clicks": "SessionClickCount_DESC",
+  "most-pages": "PageCount_DESC",
+};
+
+interface RecordingRow {
+  playerUrl: string;
+  timestamp: string;
+  totalDuration: string;
+  activeDuration: string;
+  pages: number;
+  clickCount: number;
+  country?: string;
+  device?: string;
+  url?: string;
+}
+
+interface ListRecordingsOutput {
+  filters: FiltersType;
+  dateRange: { start: string; end: string };
+  count: number;
+  recordings: RecordingRow[];
+}
+
+export async function listSessionRecordings(input: ListRecordingsInputType): Promise<ListRecordingsOutput> {
+  const parsed = ListRecordingsInput.parse(input);
+  const range = parseDateRange(parsed.dateRange);
+  const filtersStr = buildFilterEnvelope(parsed.filters ?? {}, range);
+
+  const response = await postGraphQL(
+    GET_RECORDINGS.operationName,
+    GET_RECORDINGS.query,
+    {
+      projectId: getProjectId(),
+      filters: filtersStr,
+      sortField: SORT_MAP[parsed.sortBy],
+      limit: parsed.count,
+      isAppProject: false,
+      includePageQualityIssuesSessions: false,
+    },
+  );
+
+  const items = extractWithLog(GET_RECORDINGS.operationName, response, GET_RECORDINGS.responseExtractPath);
+  if (items !== undefined && !Array.isArray(items)) {
+    throw new Error(`response shape drift: operation ${GET_RECORDINGS.operationName} returned non-array at expected path '${GET_RECORDINGS.responseExtractPath}'`);
+  }
+  const list: RecordingRow[] = Array.isArray(items)
+    ? (items as Record<string, unknown>[]).map((r) => ({
+        playerUrl: String(r.link ?? r.playerUrl ?? ""),
+        timestamp: String(r.timestamp ?? ""),
+        totalDuration: String(r.totalDuration ?? ""),
+        activeDuration: String(r.activeDuration ?? ""),
+        pages: Number(r.pagesCount ?? r.pages ?? 0),
+        clickCount: Number(r.sessionClickCount ?? r.clickCount ?? 0),
+        country: r.country as string | undefined,
+        device: r.device as string | undefined,
+        url: r.url as string | undefined,
+      }))
+    : [];
+
+  return {
+    filters: parsed.filters ?? {},
+    dateRange: { start: range.start.toISOString(), end: range.end.toISOString() },
+    count: list.length,
+    recordings: list,
+  };
 }
