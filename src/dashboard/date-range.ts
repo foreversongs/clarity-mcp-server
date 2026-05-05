@@ -63,7 +63,8 @@ export function parseDateRange(input?: string): DateRange {
   }
   const range = input.match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/);
   if (range) {
-    const [, a, b] = range;
+    const a = range[1]!;
+    const b = range[2]!;
     if (!ISO_DATE.test(a) || !ISO_DATE.test(b)) {
       throw new Error(`Invalid dateRange: ${input}. Examples: 'last 7 days', 'yesterday', '2026-04-29..2026-05-01'`);
     }
