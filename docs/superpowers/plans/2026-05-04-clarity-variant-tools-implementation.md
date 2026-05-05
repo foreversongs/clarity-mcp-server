@@ -18,7 +18,7 @@ Files we will create:
 
 | Path | Responsibility |
 |---|---|
-| `src/dashboard/client.ts` | Single HTTP function: POST a GraphQL op to `/api/v2` with cookie+csrf headers, return parsed JSON or typed error |
+| `src/dashboard/client.ts` | Single HTTP function: POST a GraphQL op to `/api/v2` with cookie+csrf headers, return parsed JSON or typed error. Emits structured stderr telemetry per call (op, status, ms, bytes, gql_errors); exports `logExtract()` for tools to log extract success/failure |
 | `src/dashboard/operations.ts` | Static map of GraphQL operation strings (operationName, query, response-extract path), captured from dashboard |
 | `src/dashboard/filters.ts` | Builds the GraphQL filter envelope from a typed `Filters` object; one table-driven function |
 | `src/dashboard/date-range.ts` | Parses `"last 7 days"` / `"yesterday"` / `"YYYY-MM-DD..YYYY-MM-DD"` strings to UTC ISO start/end |
@@ -640,12 +640,16 @@ describe("postGraphQL", () => {
     await expect(postGraphQL("op", "query", {})).rejects.toThrow(DashboardAuthError);
   });
 
-  it("posts to the dashboard URL with cookie and csrf headers", async () => {
+  it("posts to the dashboard URL with cookie and csrf headers and logs telemetry", async () => {
     process.env.CLARITY_DASHBOARD_COOKIE = "foo=bar; _csrf=ABC123; baz=qux";
+    const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
     (global.fetch as any).mockResolvedValueOnce(
       new Response(JSON.stringify({ data: { ok: true } }), { status: 200 })
     );
     await postGraphQL("getSessions", "query getSessions { x }", { projectId: "p1" });
+    // Telemetry line includes op, status, bytes, gql_errors
+    expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/^\[clarity-mcp\] op=getSessions status=200 ms=\d+ bytes=\d+ gql_errors=0$/));
+    stderr.mockRestore();
 
     const call = (global.fetch as any).mock.calls[0];
     expect(call[0]).toBe("https://clarity.microsoft.com/api/v2");
@@ -741,10 +745,25 @@ function extractCsrf(cookie: string): string {
   return match[1];
 }
 
+/**
+ * Emit a structured stderr line with telemetry the operator can grep for in
+ * CloudWatch when something feels off. Format:
+ *   [clarity-mcp] op=<name> status=<int> ms=<int> bytes=<int> gql_errors=<int>
+ *
+ * `extracted=true|false` is logged separately by the tool layer once it has
+ * tried to apply its responseExtractPath — the client doesn't know what the
+ * caller expected.
+ */
+function logCall(op: string, fields: Record<string, string | number>): void {
+  const parts = Object.entries(fields).map(([k, v]) => `${k}=${v}`).join(" ");
+  console.error(`[clarity-mcp] op=${op} ${parts}`);
+}
+
 export async function postGraphQL(operationName: string, query: string, variables: Record<string, unknown>): Promise<unknown> {
   const cookie = readCookieFromEnv();
   const csrf = extractCsrf(cookie);
 
+  const t0 = Date.now();
   const response = await fetch(DASHBOARD_API_URL, {
     method: "POST",
     headers: {
@@ -754,20 +773,45 @@ export async function postGraphQL(operationName: string, query: string, variable
     },
     body: JSON.stringify({ operationName, query, variables }),
   });
+  const ms = Date.now() - t0;
 
   if (response.status === 401 || response.status === 403) {
+    logCall(operationName, { status: response.status, ms, bytes: 0, gql_errors: 0 });
     throw new DashboardAuthError(`HTTP ${response.status} from dashboard API. ${COOKIE_ROTATION_HINT}`);
   }
+
+  const text = await response.text();
+  const bytes = text.length;
+
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-    throw new DashboardHttpError(`Dashboard API HTTP ${response.status}: ${body.slice(0, 200)}`, response.status);
+    logCall(operationName, { status: response.status, ms, bytes, gql_errors: 0 });
+    throw new DashboardHttpError(`Dashboard API HTTP ${response.status}: ${text.slice(0, 200)}`, response.status);
   }
 
-  const json = (await response.json()) as { data?: unknown; errors?: { message: string }[] };
-  if (json.errors && json.errors.length > 0) {
-    throw new DashboardHttpError(`Dashboard GraphQL errors: ${json.errors.map((e) => e.message).join("; ")}`);
+  let json: { data?: unknown; errors?: { message: string }[] };
+  try {
+    json = JSON.parse(text);
+  } catch {
+    logCall(operationName, { status: response.status, ms, bytes, gql_errors: 0 });
+    throw new DashboardHttpError(`Dashboard API returned non-JSON body: ${text.slice(0, 200)}`);
+  }
+
+  const gqlErrors = json.errors?.length ?? 0;
+  logCall(operationName, { status: response.status, ms, bytes, gql_errors: gqlErrors });
+
+  if (gqlErrors > 0) {
+    throw new DashboardHttpError(`Dashboard GraphQL errors: ${json.errors!.map((e) => e.message).join("; ")}`);
   }
   return json;
+}
+
+/**
+ * Tool-layer logging: called after the caller tries to apply its
+ * responseExtractPath, so the operator can grep for `extracted=false` to find
+ * shape drift even when the HTTP call succeeded.
+ */
+export function logExtract(op: string, extracted: boolean): void {
+  console.error(`[clarity-mcp] op=${op} extracted=${extracted}`);
 }
 ```
 
@@ -1302,7 +1346,7 @@ Create `src/dashboard/tools.ts`:
 
 ```ts
 import { CLARITY_PROJECT_ID } from "../constants.js";
-import { postGraphQL } from "./client.js";
+import { postGraphQL, logExtract } from "./client.js";
 import { LIST_CUSTOM_TAG_KEYS } from "./operations.js";
 
 function getProjectId(): string {
@@ -1313,6 +1357,12 @@ function getProjectId(): string {
   return id;
 }
 
+/**
+ * Walk a dotted path through a parsed JSON response. Returns undefined if any
+ * segment is missing. Wrapped variant logs `extracted=true|false` so the
+ * operator can grep CloudWatch for shape drift even when the HTTP call
+ * succeeded.
+ */
 function extract(obj: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {
     if (acc && typeof acc === "object" && key in (acc as Record<string, unknown>)) {
@@ -1320,6 +1370,12 @@ function extract(obj: unknown, path: string): unknown {
     }
     return undefined;
   }, obj);
+}
+
+function extractWithLog(op: string, obj: unknown, path: string): unknown {
+  const result = extract(obj, path);
+  logExtract(op, result !== undefined);
+  return result;
 }
 
 let cachedTags: string[] | null = null;
@@ -1331,9 +1387,9 @@ export async function listCustomTags(): Promise<string[]> {
     LIST_CUSTOM_TAG_KEYS.query,
     { projectId: getProjectId() },
   );
-  const tags = extract(response, LIST_CUSTOM_TAG_KEYS.responseExtractPath);
+  const tags = extractWithLog(LIST_CUSTOM_TAG_KEYS.operationName, response, LIST_CUSTOM_TAG_KEYS.responseExtractPath);
   if (!Array.isArray(tags)) {
-    throw new Error(`Unexpected response shape from listCustomTagKeys: ${JSON.stringify(response).slice(0, 200)}`);
+    throw new Error(`Unexpected response shape from listCustomTagKeys (operation: ${LIST_CUSTOM_TAG_KEYS.operationName}, expected path: ${LIST_CUSTOM_TAG_KEYS.responseExtractPath}). Response head: ${JSON.stringify(response).slice(0, 200)}`);
   }
   cachedTags = tags as string[];
   return cachedTags;
@@ -1435,6 +1491,20 @@ describe("queryMetrics", () => {
     expect(result.sessions).toEqual({ total: 1, bot: 0 });
     expect(result.engagement).toBeUndefined();
     expect(result._warnings).toContain("engagement: kaboom");
+  });
+
+  it("emits a shape-drift warning when extract path misses on a 200 response", async () => {
+    (postGraphQL as any).mockImplementation(async (op: string) => {
+      if (op === "getSessionsInfo") {
+        // Hypothetical drift: server returned 200 but renamed `sessions` to `Sessions`
+        return { data: { projectFeatures: { dashboard: { Sessions: { totalSessions: 1, totalBotSessions: 0 } } } } };
+      }
+      throw new Error(`Unexpected op: ${op}`);
+    });
+    const { queryMetrics } = await import("../tools.js");
+    const result = await queryMetrics({ metrics: ["sessions"] });
+    expect(result.sessions).toBeUndefined();
+    expect(result._warnings?.[0]).toMatch(/response shape drift.*getSessionsInfo/);
   });
 });
 ```
@@ -1582,7 +1652,13 @@ export async function queryMetrics(input: QueryMetricsInputType): Promise<QueryM
         ? { ...baseVars, skip: 0, limit: 12, isAscending: false }
         : baseVars;
       const response = await postGraphQL(op.operationName, op.query, variables);
-      const raw = extract(response, op.responseExtractPath);
+      const raw = extractWithLog(op.operationName, response, op.responseExtractPath);
+      // Self-check: if the extract path missed (response shape drifted),
+      // emit a structured warning the caller surfaces, instead of silently
+      // returning a zero-defaulted metric.
+      if (raw === undefined) {
+        throw new Error(`response shape drift: operation ${op.operationName} did not return data at expected path '${op.responseExtractPath}'`);
+      }
       return [m, shapeMetric(m, raw)] as const;
     }),
   );
@@ -1765,7 +1841,10 @@ export async function listSessionRecordings(input: ListRecordingsInputType): Pro
     },
   );
 
-  const items = extract(response, GET_RECORDINGS.responseExtractPath);
+  const items = extractWithLog(GET_RECORDINGS.operationName, response, GET_RECORDINGS.responseExtractPath);
+  if (items !== undefined && !Array.isArray(items)) {
+    throw new Error(`response shape drift: operation ${GET_RECORDINGS.operationName} returned non-array at expected path '${GET_RECORDINGS.responseExtractPath}'`);
+  }
   const list: RecordingRow[] = Array.isArray(items)
     ? (items as Record<string, unknown>[]).map((r) => ({
         playerUrl: String(r.link ?? r.playerUrl ?? ""),
@@ -1895,9 +1974,9 @@ async function discoverValues(tagKey: string): Promise<string[]> {
     LIST_CUSTOM_TAG_VALUES.query,
     { projectId: getProjectId(), tagKey },
   );
-  const raw = extract(response, LIST_CUSTOM_TAG_VALUES.responseExtractPath);
+  const raw = extractWithLog(LIST_CUSTOM_TAG_VALUES.operationName, response, LIST_CUSTOM_TAG_VALUES.responseExtractPath);
   if (!Array.isArray(raw)) {
-    throw new Error(`Unexpected response shape from listCustomTagValues for tagKey=${tagKey}`);
+    throw new Error(`response shape drift: operation ${LIST_CUSTOM_TAG_VALUES.operationName} did not return array at expected path '${LIST_CUSTOM_TAG_VALUES.responseExtractPath}' for tagKey=${tagKey}`);
   }
   return (raw as string[]).slice().sort((a, b) => {
     if (a === "control") return -1;

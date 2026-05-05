@@ -404,6 +404,29 @@ Reverse-engineering and programmatically calling an undocumented Microsoft endpo
 
 **Action:** before merging this spec into implementation, the impl plan adds a step to read clarity.microsoft.com/terms and note any clauses that bear on automated access. If anything looks restrictive, we revisit (e.g., file the upstream issue and live with the gap until Microsoft responds).
 
+### Production observability for endpoint drift
+
+The dashboard endpoint is undocumented and Microsoft can change shape silently. Three failure modes:
+
+1. **Hard fail** — non-200 or unparseable JSON. Existing error handling already surfaces this clearly.
+2. **Soft fail** — 200 with a *similar but slightly different* shape. Our `extract()` returns `undefined`, default-zero shape function returns `0`, Cody posts a report full of zeros that look plausible.
+3. **Silent semantic drift** — 200 with the right shape but different semantics (e.g., bots now included in `totalSessions`). Numbers look fine but mean something different.
+
+We mitigate (1) and (2). Mitigations:
+
+**Per-call structured telemetry.** Every `/api/v2` call emits a structured stderr log line with: operation name, HTTP status, response time, response byte size, whether `extract()` found the expected path, whether the response carried GraphQL errors. mcporter captures stderr, ECS forwards to CloudWatch. Aggregated, these show drift fast: response times double, byte size drops, `extract` failures spike — all visible without scraping Cody's Slack output. The format:
+
+```
+[clarity-mcp] op=getSessionsInfo status=200 ms=412 bytes=187 extracted=true gql_errors=0
+[clarity-mcp] op=getEngagementMetrics status=200 ms=389 bytes=164 extracted=false gql_errors=0
+```
+
+The second line is a warning sign — server returned 200 but our extract path missed. Operator can grep CloudWatch for `extracted=false` to find drift.
+
+**Tool-result self-checks.** When a dashboard tool returns to the MCP caller, sanity-check the response. If a requested metric is missing or `extract` failed, populate `_warnings: string[]` on the response with a human-readable explanation including the operation name and the path we expected. Cody surfaces warnings to the user in Slack so the human sees "metrics returned, but `topPages` was unexpectedly empty (operation: getTopPages)" rather than silently shipping zeros.
+
+(3) is unaddressed in v1 — it requires comparing values across time, which is its own project. If we ever see it in production, the response is to manually add a fixture-based parity test, not to change the production code.
+
 ### Coexistence with the official MCP
 
 If Microsoft ever exposes custom-tag filtering on the official `/mcp/*` backend, the new tools deprecate cleanly:
