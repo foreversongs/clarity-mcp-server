@@ -1,14 +1,14 @@
 {
-  "name": "@adtechnacity/clarity-mcp-server-fork",
+  "name": "@foreversongs/clarity-mcp-server-fork",
   "version": "3.0.0",
   "description": "MCP server for Microsoft Clarity, extended with dashboard /api/v2 access and custom-tag (variant) filtering",
   "license": "MIT",
   "type": "module",
   "main": "dist/src/index.js",
-  "homepage": "https://github.com/adtechnacity/clarity-mcp-server",
+  "homepage": "https://github.com/foreversongs/clarity-mcp-server",
   "repository": {
     "type": "git",
-    "url": "https://github.com/adtechnacity/clarity-mcp-server.git"
+    "url": "https://github.com/foreversongs/clarity-mcp-server.git"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com",
