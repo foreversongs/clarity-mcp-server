@@ -8,7 +8,11 @@ describe("postGraphQL", () => {
     vi.spyOn(global, "fetch");
   });
   afterEach(() => {
-    process.env.CLARITY_DASHBOARD_COOKIE = originalEnv;
+    if (originalEnv === undefined) {
+      delete process.env.CLARITY_DASHBOARD_COOKIE;
+    } else {
+      process.env.CLARITY_DASHBOARD_COOKIE = originalEnv;
+    }
     vi.restoreAllMocks();
   });
 

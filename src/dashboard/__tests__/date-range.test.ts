@@ -47,4 +47,10 @@ describe("parseDateRange", () => {
     expect(() => parseDateRange("last 100 days")).toThrow(/Invalid dateRange/);
     expect(() => parseDateRange("2026-04-29..2026")).toThrow(/Invalid dateRange/);
   });
+
+  it("rejects calendar-invalid explicit dates instead of silently rolling over", () => {
+    expect(() => parseDateRange("2026-02-30..2026-02-31")).toThrow(/Invalid dateRange/);
+    expect(() => parseDateRange("2026-13-01..2026-13-15")).toThrow(/Invalid dateRange/);
+    expect(() => parseDateRange("2026-01-32..2026-01-31")).toThrow(/Invalid dateRange/);
+  });
 });

@@ -182,16 +182,23 @@ function shapeMetric(key: Exclude<MetricKeyType, "scrollDepth">, raw: unknown, c
       return { new: r.newUsers ?? 0, returning: r.returningUsers ?? 0 };
     }
     case "topReferrers":
-    case "topPages":
-    case "topDeadClickTargets":
-    case "topClickedElements":
-      // Arrays of `{item|selector, count}` — pass through but normalize key to `item`.
+    case "topPages": {
+      // Server returns `{ item, count }` shape for these.
       if (!Array.isArray(raw)) return [];
-      return (raw as { item?: string; selector?: string; count?: number }[]).map((r) => ({
-        item: r.item ?? r.selector ?? "",
-        selector: r.selector ?? r.item ?? "",
+      return (raw as { item?: string; count?: number }[]).map((r) => ({
+        item: r.item ?? "",
         count: r.count ?? 0,
       }));
+    }
+    case "topDeadClickTargets":
+    case "topClickedElements": {
+      // Server returns `{ selector, count }` shape for element-targeted metrics.
+      if (!Array.isArray(raw)) return [];
+      return (raw as { selector?: string; count?: number }[]).map((r) => ({
+        selector: r.selector ?? "",
+        count: r.count ?? 0,
+      }));
+    }
     case "deadClicks":
     case "rageClicks":
     case "jsErrors": {
@@ -731,7 +738,7 @@ function buildDashboardUrl(args: {
   heatmapType: number;
   dateRange: string | undefined;
 }): string {
-  const projectId = process.env.CLARITY_PROJECT_ID || "w3y4c1nfgk";
+  const projectId = getProjectId();
   const params = new URLSearchParams();
   // The dashboard's URL filter format is "2;6;<regex>" — captured live.
   params.set("URL", `2;6;^${args.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\?.*)?$`);
@@ -748,7 +755,7 @@ function buildRecordingsUrl(args: {
   filters: { tagKey?: string; tagValue?: string };
   dateRange: string | undefined;
 }): string {
-  const projectId = process.env.CLARITY_PROJECT_ID || "w3y4c1nfgk";
+  const projectId = getProjectId();
   const params = new URLSearchParams();
   if (args.filters.tagKey && args.filters.tagValue) {
     params.set("Variables", `${args.filters.tagKey}:${args.filters.tagValue}`);

@@ -36,7 +36,11 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      # Publish only on tag push. workflow_dispatch runs are still useful
+      # (npm ci/test/build catch packaging regressions on demand) but must
+      # never publish from an arbitrary ref without the tag/version guarantee.
       - name: Publish
+        if: startsWith(github.ref, 'refs/tags/v')
         run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

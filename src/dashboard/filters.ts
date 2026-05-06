@@ -14,7 +14,7 @@ const URL_OP_MAP: Record<string, string> = {
   startsWith: "StartsWith",
   endsWith: "EndsWith",
   equals: "Equals",
-  matchesRegex: "MatchesRegex",
+  matchesRegex: "RegexMatch",
 };
 
 function orGroup(filters: unknown[]): unknown {
@@ -128,6 +128,10 @@ export function buildHeatmapFilter(args: {
   tagKey?: string;
   tagValue?: string;
 }): string {
+  if (args.tagValue && !args.tagKey) {
+    throw new Error("tagKey is required when tagValue is provided");
+  }
+
   const out: unknown[] = [
     {
       field: "minEnqueuedTimestamp",
@@ -149,11 +153,16 @@ export function buildHeatmapFilter(args: {
     }]));
   }
 
+  // Strip any query string the caller passed — the trailing `(\?.*)?$` in
+  // the regex is what matches an arbitrary query suffix; if `?` is escaped
+  // into the URL portion, it stops being optional and the server-side match
+  // fails.
+  const baseUrl = args.url.split("?")[0]!.split("#")[0]!;
   out.push({
     field: "Url",
     dataType: "String",
     operator: "RegexMatch",
-    value: `^${regexEscape(args.url)}(\\?.*)?$`,
+    value: `^${regexEscape(baseUrl)}(\\?.*)?$`,
     invert: false,
   });
 

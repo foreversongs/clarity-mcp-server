@@ -61,7 +61,7 @@ server.tool(
       return { content: [{ type: "text", text: JSON.stringify(tags, null, 2) }] };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      return { content: [{ type: "text", text: msg }] };
+      return { content: [{ type: "text", text: msg }], isError: true };
     }
   },
 );
@@ -77,7 +77,7 @@ server.tool(
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      return { content: [{ type: "text", text: msg }] };
+      return { content: [{ type: "text", text: msg }], isError: true };
     }
   },
 );
@@ -93,7 +93,7 @@ server.tool(
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      return { content: [{ type: "text", text: msg }] };
+      return { content: [{ type: "text", text: msg }], isError: true };
     }
   },
 );
@@ -109,7 +109,7 @@ server.tool(
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      return { content: [{ type: "text", text: msg }] };
+      return { content: [{ type: "text", text: msg }], isError: true };
     }
   },
 );
@@ -125,7 +125,7 @@ server.tool(
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
-      return { content: [{ type: "text", text: msg }] };
+      return { content: [{ type: "text", text: msg }], isError: true };
     }
   },
 );

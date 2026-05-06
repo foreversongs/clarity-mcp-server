@@ -52,8 +52,6 @@ function endOfDayET(d: Date): Date {
   return tzWallClockToUtc(yyyy, mm, dd, true);
 }
 
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-
 export function parseDateRange(input?: string): DateRange {
   const now = new Date();
   // "last N days" is a rolling instant-arithmetic window from `now` back
@@ -77,14 +75,24 @@ export function parseDateRange(input?: string): DateRange {
   }
   const range = input.match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/);
   if (range) {
-    const a = range[1]!;
-    const b = range[2]!;
-    if (!ISO_DATE.test(a) || !ISO_DATE.test(b)) {
+    const a = range[1]!.split("-").map(Number) as [number, number, number];
+    const b = range[2]!.split("-").map(Number) as [number, number, number];
+    // The outer regex enforces the YYYY-MM-DD shape but does not catch
+    // calendar-invalid inputs like "2026-02-30" — Date.UTC silently rolls
+    // those over (Feb 30 → Mar 2). Reject any input whose components don't
+    // round-trip through Date.UTC, so we never return a window the caller
+    // didn't ask for.
+    if (!isValidCalendarDate(a) || !isValidCalendarDate(b)) {
       throw new Error(`Invalid dateRange: ${input}. Examples: 'last 7 days', 'yesterday', '2026-04-29..2026-05-01'`);
     }
-    const start = tzWallClockToUtc(...a.split("-").map(Number) as [number, number, number], false);
-    const end = tzWallClockToUtc(...b.split("-").map(Number) as [number, number, number], true);
+    const start = tzWallClockToUtc(...a, false);
+    const end = tzWallClockToUtc(...b, true);
     return { start, end };
   }
   throw new Error(`Invalid dateRange: ${input}. Examples: 'last 7 days', 'yesterday', '2026-04-29..2026-05-01'`);
+}
+
+function isValidCalendarDate([yyyy, mm, dd]: [number, number, number]): boolean {
+  const d = new Date(Date.UTC(yyyy, mm - 1, dd));
+  return d.getUTCFullYear() === yyyy && d.getUTCMonth() === mm - 1 && d.getUTCDate() === dd;
 }

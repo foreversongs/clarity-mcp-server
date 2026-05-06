@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 vi.mock("../client.js", () => ({
   postGraphQL: vi.fn(),
@@ -9,6 +9,15 @@ vi.mock("../client.js", () => ({
 
 const { postGraphQL } = await import("../client.js");
 
+const originalProjectId = process.env.CLARITY_PROJECT_ID;
+function restoreProjectId() {
+  if (originalProjectId === undefined) {
+    delete process.env.CLARITY_PROJECT_ID;
+  } else {
+    process.env.CLARITY_PROJECT_ID = originalProjectId;
+  }
+}
+
 describe("listCustomTags", () => {
   beforeEach(async () => {
     process.env.CLARITY_PROJECT_ID = "test-project";
@@ -16,6 +25,7 @@ describe("listCustomTags", () => {
     const tools = await import("../tools.js");
     tools.__resetCacheForTests();
   });
+  afterEach(restoreProjectId);
 
   it("returns the array of tag keys", async () => {
     (postGraphQL as any).mockResolvedValueOnce({
@@ -45,6 +55,7 @@ describe("queryMetrics", () => {
     const tools = await import("../tools.js");
     tools.__resetCacheForTests();
   });
+  afterEach(restoreProjectId);
 
   it("calls only the operations needed for the requested metrics", async () => {
     (postGraphQL as any).mockImplementation(async (op: string) => {
@@ -109,6 +120,7 @@ describe("listSessionRecordings", () => {
     const tools = await import("../tools.js");
     tools.__resetCacheForTests();
   });
+  afterEach(restoreProjectId);
 
   it("returns the recordings array with normalized fields", async () => {
     (postGraphQL as any).mockResolvedValueOnce({
@@ -156,6 +168,7 @@ describe("compareByVariant", () => {
     const tools = await import("../tools.js");
     tools.__resetCacheForTests();
   });
+  afterEach(restoreProjectId);
 
   it("auto-discovers values, fans out, and computes deltas vs control", async () => {
     (postGraphQL as any).mockImplementation(async (op: string, _q: string, vars: any) => {
@@ -184,6 +197,7 @@ describe("getClickElements", () => {
     process.env.CLARITY_PROJECT_ID = "test-project";
     vi.resetAllMocks();
   });
+  afterEach(restoreProjectId);
 
   it("maps clickType -> heatmapType correctly and parses the element map", async () => {
     // Mock both calls fired by getClickElements: heatmap data + payload (for dims)
@@ -299,6 +313,7 @@ describe("queryMetrics scrollDepth", () => {
     process.env.CLARITY_PROJECT_ID = "test-project";
     vi.resetAllMocks();
   });
+  afterEach(restoreProjectId);
 
   it("returns sessionScrollDepth + pageViewScrollDepth + thresholds when filters.url is provided", async () => {
     // queryMetrics fires: GET_SCROLL_DEPTH (session) + GET_HEATMAP_TYPE_DATA (PV) in parallel.

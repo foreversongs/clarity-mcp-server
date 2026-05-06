@@ -148,7 +148,7 @@ export const GET_TOP_CLICKED_ELEMENTS: Operation = {
  */
 export const LIST_CUSTOM_TAG_KEYS: Operation = {
   operationName: "listCustomTagKeys",
-  query: "query listCustomTagKeys($projectId: String!) { /* PROVISIONAL — verify via live capture */ projectFeatures(id: $projectId) { id customTagKeys __typename } }",
+  query: "query listCustomTagKeys($projectId: String!) {projectFeatures(id: $projectId) { id customTagKeys __typename } }",
   responseExtractPath: "data.projectFeatures.customTagKeys",
 };
 
@@ -158,7 +158,7 @@ export const LIST_CUSTOM_TAG_KEYS: Operation = {
  */
 export const LIST_CUSTOM_TAG_VALUES: Operation = {
   operationName: "listCustomTagValues",
-  query: "query listCustomTagValues($projectId: String!, $tagKey: String!) { /* PROVISIONAL — verify via live capture */ projectFeatures(id: $projectId) { id customTagValues(tagKey: $tagKey) __typename } }",
+  query: "query listCustomTagValues($projectId: String!, $tagKey: String!) {projectFeatures(id: $projectId) { id customTagValues(tagKey: $tagKey) __typename } }",
   responseExtractPath: "data.projectFeatures.customTagValues",
 };
 
@@ -170,7 +170,7 @@ export const LIST_CUSTOM_TAG_VALUES: Operation = {
  */
 export const GET_RECORDINGS: Operation = {
   operationName: "getRecordings",
-  query: "query getRecordings($projectId: String!, $filters: String, $sortField: String, $limit: Int, $isAppProject: Boolean, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — verify via live capture */ projectFeatures(id: $projectId) { id recordings(filters: $filters, sortField: $sortField, limit: $limit, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { items { link timestamp totalDuration activeDuration pagesCount sessionClickCount country device url __typename } __typename } __typename } }",
+  query: "query getRecordings($projectId: String!, $filters: String, $sortField: String, $limit: Int, $isAppProject: Boolean, $includePageQualityIssuesSessions: Boolean) {projectFeatures(id: $projectId) { id recordings(filters: $filters, sortField: $sortField, limit: $limit, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { items { link timestamp totalDuration activeDuration pagesCount sessionClickCount country device url __typename } __typename } __typename } }",
   responseExtractPath: "data.projectFeatures.recordings.items",
 };
 

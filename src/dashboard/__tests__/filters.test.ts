@@ -92,12 +92,20 @@ describe("buildHeatmapFilter", () => {
     });
   });
 
-  it("regex-escapes URL special chars to avoid catastrophic-backtracking surprises", () => {
-    const f = buildHeatmapFilter({ url: "https://example.com/checkout?step=1+2", dateRange });
+  it("strips query string and fragment from the URL before building the regex", () => {
+    const f = buildHeatmapFilter({ url: "https://example.com/checkout?step=1+2#hash", dateRange });
     const parsed = JSON.parse(f);
     const urlFilter = parsed.filters.find((x: any) => x.field === "Url");
-    // `.` `?` `+` and `*` (not present) are all escaped; `=` is left alone.
-    expect(urlFilter.value).toBe("^https://example\\.com/checkout\\?step=1\\+2(\\?.*)?$");
+    // The query string and fragment are stripped; the trailing `(\?.*)?$`
+    // pattern in the regex matches arbitrary query suffixes server-side.
+    // `.` is regex-escaped in the path.
+    expect(urlFilter.value).toBe("^https://example\\.com/checkout(\\?.*)?$");
+  });
+
+  it("throws if tagValue is set without tagKey (matches buildFilterEnvelope)", () => {
+    expect(() =>
+      buildHeatmapFilter({ url: "https://example.com/landing", dateRange, tagValue: "0" }),
+    ).toThrow(/tagKey/);
   });
 
   it("wraps a variant filter in a single-child Or group", () => {

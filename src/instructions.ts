@@ -23,7 +23,7 @@ Typed dashboard metrics for any combination of filters. Use this for ANY aggrega
 
 Filter dimensions include: \`url\`, \`device\`, \`browser\`, \`os\`, \`country\`, \`channel\`, \`source\`, \`medium\`, \`campaign\`, \`smartEvents\`, \`javascriptErrors\`, \`scrollDepth\` (range), \`sessionDuration\` (range), \`pagesCount\` (range), and the variant filters \`tagKey\`+\`tagValue\`.
 
-Metrics: \`sessions\`, \`engagement\`, \`newVsReturning\`, \`topReferrers\`, \`topPages\`, \`scrollDepth\`, \`deadClicks\`, \`rageClicks\`, \`jsErrors\`, \`topDeadClickTargets\`, \`topClickedElements\`. Default: all.
+Metrics: \`sessions\`, \`newVsReturning\`, \`topReferrers\`, \`topPages\`, \`scrollDepth\`, \`deadClicks\`, \`rageClicks\`, \`jsErrors\`, \`topDeadClickTargets\`, \`topClickedElements\`. Default: all.
 
 Date range: accepts \`"last 7 days"\` (default), \`"yesterday"\`, \`"today"\`, \`"last N days"\` (1-90), \`"YYYY-MM-DD..YYYY-MM-DD"\`.
 
@@ -71,7 +71,7 @@ RAG over Microsoft Clarity documentation. Use for "how does X work" questions ab
 
 ## Error handling
 
-If you see "Clarity dashboard session expired", relay the message to the user — the cookie needs to be rotated by an operator. The data tools will not work until a fresh cookie is provided via Pulumi config.
+If you see "Clarity dashboard session expired", relay the message to the user — \`CLARITY_DASHBOARD_COOKIE\` needs to be rotated. The data tools will not work until a fresh cookie is supplied via the runtime configuration (env var, CLI flag, or whatever mechanism the deployment uses).
 
 If you see "Clarity API token not set", the documentation tool can't run. The data tools may still work.
 `;
