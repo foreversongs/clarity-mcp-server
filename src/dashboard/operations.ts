@@ -126,7 +126,7 @@ export const GET_JS_ERRORS: Operation = GET_INSIGHTS_JS_ERRORS;
 // TODO: provisional — capture from a live dashboard render and replace
 export const GET_TOP_DEAD_CLICK_TARGETS: Operation = {
   operationName: "getTopMetrics",
-  query: "query getTopMetrics($projectId: String!, $filters: String, $skip: Int, $isAppProject: Boolean, $limit: Int, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — capture from a live dashboard render and replace */projectFeatures(id: $projectId) { id dashboard(filters: $filters, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { topDeadClickTargets(skip: $skip, limit: $limit) { item count __typename } __typename } __typename } }",
+  query: "query getTopMetrics($projectId: String!, $filters: String, $skip: Int, $isAppProject: Boolean, $limit: Int, $includePageQualityIssuesSessions: Boolean) {projectFeatures(id: $projectId) { id dashboard(filters: $filters, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { topDeadClickTargets(skip: $skip, limit: $limit) { item count __typename } __typename } __typename } }",
   responseExtractPath: "data.projectFeatures.dashboard.topDeadClickTargets",
 };
 
@@ -136,7 +136,7 @@ export const GET_TOP_DEAD_CLICK_TARGETS: Operation = {
 // TODO: provisional — capture from a live dashboard render and replace
 export const GET_TOP_CLICKED_ELEMENTS: Operation = {
   operationName: "getTopMetrics",
-  query: "query getTopMetrics($projectId: String!, $filters: String, $skip: Int, $isAppProject: Boolean, $limit: Int, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — capture from a live dashboard render and replace */projectFeatures(id: $projectId) { id dashboard(filters: $filters, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { topClickedElements(skip: $skip, limit: $limit) { item count __typename } __typename } __typename } }",
+  query: "query getTopMetrics($projectId: String!, $filters: String, $skip: Int, $isAppProject: Boolean, $limit: Int, $includePageQualityIssuesSessions: Boolean) {projectFeatures(id: $projectId) { id dashboard(filters: $filters, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { topClickedElements(skip: $skip, limit: $limit) { item count __typename } __typename } __typename } }",
   responseExtractPath: "data.projectFeatures.dashboard.topClickedElements",
 };
 
