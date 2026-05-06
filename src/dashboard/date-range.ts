@@ -87,6 +87,9 @@ export function parseDateRange(input?: string): DateRange {
     }
     const start = tzWallClockToUtc(...a, false);
     const end = tzWallClockToUtc(...b, true);
+    if (start.getTime() > end.getTime()) {
+      throw new Error(`Invalid dateRange: ${input}. Start date must be on or before end date.`);
+    }
     return { start, end };
   }
   throw new Error(`Invalid dateRange: ${input}. Examples: 'last 7 days', 'yesterday', '2026-04-29..2026-05-01'`);

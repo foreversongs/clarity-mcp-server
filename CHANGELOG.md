@@ -36,3 +36,6 @@ All notable divergences from upstream `microsoft/clarity-mcp-server` and changes
 
 ### Removed
 - **`query-analytics-dashboard`** tool registration — replaced by the typed `query-metrics`. The NL parser endpoint is deprecated upstream and produced inconsistent results vs the dashboard UI for variant queries.
+
+### Known limitations
+- A handful of GraphQL operations are **provisional**, flagged in their docstrings: `LIST_CUSTOM_TAG_KEYS`, `LIST_CUSTOM_TAG_VALUES`, `GET_TOP_PAGES`, `GET_RECORDINGS`. Their field names were inferred from schema introspection, not captured live. Mismatch with the live schema will surface as a loud `DashboardHttpError` (e.g. `Unknown field "customTagKeys" on type "ProjectFeatures"`); failures are not silent, but `list-custom-tags`, `compare-by-variant`, and `list-session-recordings` should be verified against your live project before being depended on for downstream automation.

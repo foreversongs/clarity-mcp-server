@@ -21,7 +21,7 @@ Use this when you don't know which experiment tags exist for the project.
 #### \`${QUERY_METRICS_TOOL}\`
 Typed dashboard metrics for any combination of filters. Use this for ANY aggregate metric question — variant or not.
 
-Filter dimensions include: \`url\`, \`device\`, \`browser\`, \`os\`, \`country\`, \`channel\`, \`source\`, \`medium\`, \`campaign\`, \`smartEvents\`, \`javascriptErrors\`, \`scrollDepth\` (range), \`sessionDuration\` (range), \`pagesCount\` (range), and the variant filters \`tagKey\`+\`tagValue\`.
+Filter dimensions include: \`url\`, \`device\`, \`browser\`, \`os\`, \`country\`, \`state\`, \`city\`, \`channel\`, \`source\`, \`medium\`, \`campaign\`, \`smartEvents\`, \`javascriptErrors\`, \`scrollDepth\` (range), \`sessionDuration\` (range), \`pagesCount\` (range), and the variant filters \`tagKey\`+\`tagValue\`.
 
 Metrics: \`sessions\`, \`newVsReturning\`, \`topReferrers\`, \`topPages\`, \`scrollDepth\`, \`deadClicks\`, \`rageClicks\`, \`jsErrors\`, \`topDeadClickTargets\`, \`topClickedElements\`. Default: all.
 

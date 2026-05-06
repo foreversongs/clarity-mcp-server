@@ -110,6 +110,8 @@ npm run probe       # smoke-test /api/v2 connectivity (requires CLARITY_DASHBOAR
 
 The dashboard tools talk to `https://clarity.microsoft.com/api/v2`, the same GraphQL endpoint the Clarity dashboard UI uses. Operation strings in `src/dashboard/operations.ts` are captured verbatim from the dashboard's network traffic and copied into the source. If Clarity changes the wire format, recapture and update.
 
+A handful of operations are still **provisional** — flagged in their docstrings — because they were inferred from schema introspection rather than captured live. These currently include `LIST_CUSTOM_TAG_KEYS`, `LIST_CUSTOM_TAG_VALUES`, `GET_TOP_PAGES`, and `GET_RECORDINGS`. If the inferred field names disagree with the live schema, the affected tool will surface a `DashboardHttpError` with an `Unknown field` message — the failure is loud rather than silent, but operators relying on `list-custom-tags`, `compare-by-variant`, or `list-session-recordings` should verify against their live project before depending on the response shape.
+
 The filter envelope (`src/dashboard/filters.ts`) handles two distinct shapes:
 - `buildFilterEnvelope` for session-level operations (used by `query-metrics`, `list-session-recordings`, `compare-by-variant`)
 - `buildHeatmapFilter` for page-event-scoped operations (used by `get-click-elements` and the heatmap-based scroll depth path in `query-metrics`)

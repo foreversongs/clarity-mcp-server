@@ -53,4 +53,9 @@ describe("parseDateRange", () => {
     expect(() => parseDateRange("2026-13-01..2026-13-15")).toThrow(/Invalid dateRange/);
     expect(() => parseDateRange("2026-01-32..2026-01-31")).toThrow(/Invalid dateRange/);
   });
+
+  it("rejects explicit ranges where start is after end", () => {
+    expect(() => parseDateRange("2026-05-10..2026-05-01")).toThrow(/Start date must be on or before end date/);
+    expect(() => parseDateRange("2027-01-01..2026-12-31")).toThrow(/Start date must be on or before end date/);
+  });
 });
