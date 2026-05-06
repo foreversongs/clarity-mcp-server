@@ -9,9 +9,11 @@ describe("parseDateRange", () => {
   });
   afterAll(() => vi.useRealTimers());
 
-  it("defaults to last 7 days when input is undefined", () => {
+  it("defaults to last 7 days as a rolling window from now (no day-align)", () => {
     const r = parseDateRange();
-    expect(r.start.toISOString()).toBe("2026-04-27T04:00:00.000Z"); // 2026-04-27 00:00 ET = 04:00 UTC (EDT)
+    // 7×24h before 2026-05-04T15:30:00Z = 2026-04-27T15:30:00Z. Matches the
+    // dashboard's "Last 7 days" filter, which is also rolling.
+    expect(r.start.toISOString()).toBe("2026-04-27T15:30:00.000Z");
     expect(r.end.toISOString()).toBe("2026-05-04T15:30:00.000Z");
   });
 
@@ -27,9 +29,10 @@ describe("parseDateRange", () => {
     expect(r.end.toISOString()).toBe("2026-05-04T03:59:59.999Z");
   });
 
-  it('parses "last 30 days"', () => {
+  it('parses "last 30 days" as rolling window', () => {
     const r = parseDateRange("last 30 days");
-    expect(r.start.toISOString()).toBe("2026-04-04T04:00:00.000Z");
+    // 30×24h before 2026-05-04T15:30:00Z = 2026-04-04T15:30:00Z
+    expect(r.start.toISOString()).toBe("2026-04-04T15:30:00.000Z");
     expect(r.end.toISOString()).toBe("2026-05-04T15:30:00.000Z");
   });
 

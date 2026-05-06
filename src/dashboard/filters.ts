@@ -1,5 +1,13 @@
 import type { FiltersType } from "./types.js";
-import { formatNaiveET, type DateRange } from "./date-range.js";
+import { formatTimestamp, type DateRange } from "./date-range.js";
+
+/**
+ * Escape a literal URL for use inside a regex pattern. Used to build the
+ * heatmap's URL filter, which is `RegexMatch`-typed in the dashboard wire.
+ */
+function regexEscape(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 const URL_OP_MAP: Record<string, string> = {
   contains: "Contains",
@@ -23,9 +31,7 @@ export function buildFilterEnvelope(filters: FiltersType, dateRange: DateRange):
       field: "minEnqueuedTimestamp",
       dataType: "Number",
       operator: "Range",
-      // Naive ET strings (no `Z`, no offset). The backend bucket-aligns to ET
-      // local time and ISO-Z strings produce slightly off counts.
-      value: { min: formatNaiveET(dateRange.start), max: formatNaiveET(dateRange.end) },
+      value: { min: formatTimestamp(dateRange.start), max: formatTimestamp(dateRange.end) },
     },
   ];
 
@@ -98,6 +104,58 @@ export function buildFilterEnvelope(filters: FiltersType, dateRange: DateRange):
   }
 
   out.push({ field: "pageDuration", dataType: "Number", operator: "Greater", value: 0 });
+
+  return JSON.stringify({ operator: "And", filters: out });
+}
+
+/**
+ * Build the filter envelope for /api/v2 heatmap operations
+ * (`getHeatmapTypeData`, `getHeatmapPayload`). Differs from
+ * `buildFilterEnvelope` in three ways:
+ *
+ *  - URL filter uses `RegexMatch` (the dashboard's wire format for heatmap
+ *    URL filtering) and a regex of the form `^<escaped url>(\?.*)?$`, so
+ *    the URL matches with or without query parameters.
+ *  - No `pageDuration > 0` clause. Heatmap data is page-event-scoped,
+ *    not session-scoped, so the session-level page-duration filter is
+ *    both unnecessary and (in some cases) over-restrictive.
+ *  - Variant filter is wrapped in a single-child `Or` group (same as the
+ *    main filter envelope, just isolated here for clarity).
+ */
+export function buildHeatmapFilter(args: {
+  url: string;
+  dateRange: DateRange;
+  tagKey?: string;
+  tagValue?: string;
+}): string {
+  const out: unknown[] = [
+    {
+      field: "minEnqueuedTimestamp",
+      dataType: "Number",
+      operator: "Range",
+      value: { min: formatTimestamp(args.dateRange.start), max: formatTimestamp(args.dateRange.end) },
+    },
+  ];
+
+  if (args.tagKey && args.tagValue) {
+    out.push(orGroup([{
+      operator: "Contains", field: "Variables", dataType: "Other",
+      value: `${args.tagKey}=${args.tagValue}`, invert: false,
+    }]));
+  } else if (args.tagKey && !args.tagValue) {
+    out.push(orGroup([{
+      operator: "Contains", field: "Variables", dataType: "Other",
+      value: `${args.tagKey}=`, invert: false,
+    }]));
+  }
+
+  out.push({
+    field: "Url",
+    dataType: "String",
+    operator: "RegexMatch",
+    value: `^${regexEscape(args.url)}(\\?.*)?$`,
+    invert: false,
+  });
 
   return JSON.stringify({ operator: "And", filters: out });
 }

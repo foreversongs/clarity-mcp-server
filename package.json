@@ -1,6 +1,6 @@
 {
   "name": "@foreversongs/clarity-mcp-server-fork",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "MCP server for Microsoft Clarity, extended with dashboard /api/v2 access and custom-tag (variant) filtering",
   "license": "MIT",
   "type": "module",

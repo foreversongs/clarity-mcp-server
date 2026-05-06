@@ -11,7 +11,9 @@ import {
   COMPARE_BY_VARIANT_TOOL,
   DOCUMENTATION_DESCRIPTION,
   DOCUMENTATION_TOOL,
-  NEW_SESSION_RECORDINGS_DESCRIPTION,
+  GET_CLICK_ELEMENTS_DESCRIPTION,
+  GET_CLICK_ELEMENTS_TOOL,
+  SESSION_RECORDINGS_DESCRIPTION,
   QUERY_METRICS_DESCRIPTION,
   QUERY_METRICS_TOOL,
   SESSION_RECORDINGS_TOOL,
@@ -21,9 +23,11 @@ import {
 import { SYSTEM_INSTRUCTIONS_PROMPT } from "./instructions.js";
 import {
   CompareByVariantInputShape,
+  GetClickElementsInputShape,
   ListRecordingsInputShape,
   QueryMetricsInputShape,
   compareByVariant,
+  getClickElements,
   listCustomTags,
   listSessionRecordings,
   queryMetrics,
@@ -80,7 +84,7 @@ server.tool(
 
 server.tool(
   SESSION_RECORDINGS_TOOL,
-  NEW_SESSION_RECORDINGS_DESCRIPTION,
+  SESSION_RECORDINGS_DESCRIPTION,
   ListRecordingsInputShape,
   { title: "List Session Recordings", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   async (input) => {
@@ -102,6 +106,22 @@ server.tool(
   async (input) => {
     try {
       const result = await compareByVariant(input);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { content: [{ type: "text", text: msg }] };
+    }
+  },
+);
+
+server.tool(
+  GET_CLICK_ELEMENTS_TOOL,
+  GET_CLICK_ELEMENTS_DESCRIPTION,
+  GetClickElementsInputShape,
+  { title: "Get Click Elements", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  async (input) => {
+    try {
+      const result = await getClickElements(input);
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { postGraphQL, logExtract } from "./client.js";
-import { ANALYTICS_DASHBOARD_URL, CLARITY_API_TOKEN } from "../constants.js";
 import {
   LIST_CUSTOM_TAG_KEYS,
   LIST_CUSTOM_TAG_VALUES,
@@ -15,6 +14,7 @@ import {
   GET_TOP_DEAD_CLICK_TARGETS,
   GET_TOP_CLICKED_ELEMENTS,
   GET_RECORDINGS,
+  GET_HEATMAP_TYPE_DATA,
   type Operation,
 } from "./operations.js";
 import {
@@ -25,7 +25,7 @@ import {
   ALL_METRICS,
 } from "./types.js";
 import { parseDateRange, type DateRange } from "./date-range.js";
-import { buildFilterEnvelope } from "./filters.js";
+import { buildFilterEnvelope, buildHeatmapFilter } from "./filters.js";
 
 function getProjectId(): string {
   const id = process.env.CLARITY_PROJECT_ID;
@@ -104,7 +104,29 @@ export interface QueryMetricsOutput {
   newVsReturning?: { new: number; returning: number };
   topReferrers?: { item: string; count: number }[];
   topPages?: { item: string; count: number }[];
-  scrollDepth?: number;
+  /**
+   * Page-view-scoped scroll depth: average max scroll % per page view of the
+   * URL in `filters.url`, computed from the heatmap endpoint's
+   * `scrollMapInfo` survival distribution. This is the right metric for
+   * single-page experiments — answers "how deep did people scroll on this page?"
+   * Only set when `filters.url` is provided; otherwise the heatmap endpoint
+   * cannot be called and only `sessionScrollDepth` is returned.
+   */
+  pageViewScrollDepth?: number;
+  /**
+   * Session-scoped scroll depth from `getInsightsMetrics` — max scroll across
+   * all pages in the session, averaged across matching sessions. Always set
+   * when scrollDepth is requested. Use this when comparing to the dashboard's
+   * "Scroll depth" card.
+   */
+  sessionScrollDepth?: number;
+  /**
+   * Reach thresholds derived from `scrollMapInfo`: % of page views that
+   * scrolled to at least 25 / 50 / 75 / 100 percent of the page. More
+   * actionable than a single average for CRO conversations. Only set when
+   * `filters.url` is provided.
+   */
+  scrollReachThresholds?: { reach25: number; reach50: number; reach75: number; reach100: number };
   /**
    * Friction rates are computed as `pages with at least one event / total
    * page views in matching sessions` — a per-page-view rate that aligns
@@ -203,65 +225,13 @@ async function fetchPagesPerSession(filtersStr: string, projectId: string): Prom
 }
 
 /**
- * Fetch scroll depth via the official MCP backend's NL parser
- * (`/mcp/dashboard/query`). This is the only path that produces the
- * per-page-view-excluding-zero formula the dashboard's Insights card uses
- * (~96% on a typical engaged page); `/api/v2`'s `scrollDepth` field is a
- * session-level number that includes zero-scroll bounces (~79%) and
- * doesn't expose enough raw data to reproduce the per-scroller average.
- *
- * Limitations:
- * - The NL parser does not accept custom-tag (variant) filters. When
- *   `filters.tagKey` is set, the caller should fall back to /api/v2 and
- *   surface a warning that the formula differs.
- * - Only URL filter values are translated. Other filter dimensions
- *   (device, country, etc.) are not passed through here; if you need
- *   them, fall back to /api/v2 instead.
+ * Fetch session-scoped scroll depth via `/api/v2 getInsightsMetrics`. This is
+ * the same number the dashboard's "Scroll depth" card displays — max scroll
+ * % across all pages in the session, averaged over matching sessions. Useful
+ * for cross-reference with the dashboard UI; less useful for single-page
+ * experiment analysis (where you want PV-scoped — see fetchScrollDepthFromHeatmap).
  */
-async function fetchScrollDepthViaNL(filters: FiltersType, range: DateRange): Promise<{ value: number; warning?: string }> {
-  if (!CLARITY_API_TOKEN) {
-    return { value: 0, warning: "scrollDepth: CLARITY_API_TOKEN not set; cannot route to NL parser. Configure the token to receive scroll depth." };
-  }
-  const dateStr = `between '${range.start.toISOString().slice(0, 10)}' and '${range.end.toISOString().slice(0, 10)}'`;
-  const urlPart = filters.url?.length
-    ? ` on pages where the URL contains '${filters.url[0]!.value}'`
-    : "";
-  const query = `Average scroll depth percentage per page view, excluding non-scrollers,${urlPart} ${dateStr}`;
-
-  try {
-    const resp = await fetch(ANALYTICS_DASHBOARD_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${CLARITY_API_TOKEN}`,
-      },
-      body: JSON.stringify({ query, timezone: "America/New_York" }),
-    });
-    if (!resp.ok) {
-      return { value: 0, warning: `scrollDepth: NL parser HTTP ${resp.status}` };
-    }
-    const json = (await resp.json()) as { data?: { AvgScrollDepthPercent?: number }[]; dataErrorType?: number };
-    if (json.dataErrorType && json.dataErrorType !== 0) {
-      return { value: 0, warning: `scrollDepth: NL parser dataErrorType=${json.dataErrorType}` };
-    }
-    const datum = json.data?.[0];
-    const v = datum?.AvgScrollDepthPercent;
-    if (typeof v !== "number") {
-      return { value: 0, warning: "scrollDepth: NL parser returned no AvgScrollDepthPercent field" };
-    }
-    return { value: v };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { value: 0, warning: `scrollDepth: NL parser fetch failed (${msg})` };
-  }
-}
-
-/**
- * Fetch scroll depth via /api/v2 — returns the session-level number
- * (includes 0-scroll page views). Used as fallback when NL parser can't
- * answer (variant filters present, or env without bearer token).
- */
-async function fetchScrollDepthViaApiV2(filtersStr: string, projectId: string): Promise<number> {
+async function fetchSessionScrollDepth(filtersStr: string, projectId: string): Promise<number> {
   const response = await postGraphQL(
     GET_SCROLL_DEPTH.operationName,
     GET_SCROLL_DEPTH.query,
@@ -269,6 +239,100 @@ async function fetchScrollDepthViaApiV2(filtersStr: string, projectId: string): 
   );
   const dash = (response as { data?: { projectFeatures?: { dashboard?: { scrollDepth?: number } } } })?.data?.projectFeatures?.dashboard;
   return dash?.scrollDepth ?? 0;
+}
+
+interface ScrollMapBand {
+  scrollReachY: number;
+  cumulativeSum: number;
+  percUsers: number;
+}
+
+/**
+ * Compute per-page-view scroll depth and reach thresholds from the heatmap
+ * endpoint's `scrollMapInfo` distribution. Returns null when the URL filter
+ * is missing (the heatmap endpoint requires a URL) or when there's no data.
+ *
+ * `scrollMapInfo` is a survival-function distribution: each band carries
+ * `cumulativeSum` (count of PVs that reached at least `scrollReachY`).
+ * Average max scroll = Σ Y_i × (cumSum_i − cumSum_{i+1}) / cumSum_0.
+ *
+ * For mobile landing pages this number is typically much lower than the
+ * session-level value returned by the dashboard's "Scroll depth" card,
+ * because session-level aggregates max scroll across all pages a session
+ * touched while the page-view-scoped value only counts scroll on the page
+ * matched by `filters.url`.
+ *
+ * Reach thresholds (`% of PVs who reached ≥ 25/50/75/100`) are more useful
+ * than a single average for engagement comparisons (e.g. "did the new
+ * placement get more eyes on a section below the fold?").
+ */
+async function fetchScrollDepthFromHeatmap(args: {
+  filters: FiltersType;
+  range: DateRange;
+  projectId: string;
+}): Promise<{
+  pageViewScrollDepth: number;
+  thresholds: { reach25: number; reach50: number; reach75: number; reach100: number };
+} | null> {
+  const url = args.filters.url?.[0]?.value;
+  if (!url) return null;
+
+  const heatmapFilter = buildHeatmapFilter({
+    url,
+    dateRange: args.range,
+    tagKey: args.filters.tagKey,
+    tagValue: args.filters.tagValue,
+  });
+
+  const response = await postGraphQL(
+    GET_HEATMAP_TYPE_DATA.operationName,
+    GET_HEATMAP_TYPE_DATA.query,
+    {
+      projectId: args.projectId,
+      filter: heatmapFilter,
+      version: "",
+      deviceType: 0, // mobile by default — desktop scroll data is available via get-click-elements
+      heatmapType: 1, // scroll
+      useHashAlpha: false,
+      includeIncompleteSessions: false,
+      includePageQualityIssuesSessions: false,
+    },
+  );
+  const info = (response as { data?: { projectFeatures?: { heatmapTypeInfo?: { scrollMapInfo?: ScrollMapBand[] | null } | null } } })?.data?.projectFeatures?.heatmapTypeInfo;
+  if (!info || !Array.isArray(info.scrollMapInfo) || info.scrollMapInfo.length < 2) {
+    return null;
+  }
+
+  const sortedByY = [...info.scrollMapInfo].sort((a, b) => a.scrollReachY - b.scrollReachY);
+  const first = sortedByY[0]!;
+  const total = first.cumulativeSum;
+  if (total <= 0) return null;
+
+  // Survival-function expected max scroll
+  let weighted = 0;
+  for (let i = 1; i < sortedByY.length; i++) {
+    const drop = sortedByY[i - 1]!.cumulativeSum - sortedByY[i]!.cumulativeSum;
+    weighted += sortedByY[i - 1]!.scrollReachY * drop;
+  }
+  const last = sortedByY[sortedByY.length - 1]!;
+  weighted += last.scrollReachY * last.cumulativeSum;
+  const pageViewScrollDepth = weighted / total;
+
+  // Reach thresholds — find percUsers at first band where scrollReachY >= threshold
+  const reachAt = (threshold: number): number => {
+    const band = sortedByY.find((b) => b.scrollReachY >= threshold);
+    return band ? band.percUsers : 0;
+  };
+
+  return {
+    pageViewScrollDepth,
+    thresholds: {
+      reach25: reachAt(25),
+      reach50: reachAt(50),
+      reach75: reachAt(75),
+      reach100: reachAt(100),
+    },
+  };
 }
 
 export async function queryMetrics(input: QueryMetricsInputType): Promise<QueryMetricsOutput> {
@@ -302,21 +366,17 @@ export async function queryMetrics(input: QueryMetricsInputType): Promise<QueryM
   }
   const totalPageViews = totalSessionsForPV * pagesPerSession;
 
-  // Scroll depth has its own routing: NL parser when no variant filter, /api/v2
-  // fallback when variant filter present (with a warning explaining the formula
-  // differs from non-variant queries).
+  // Scroll depth: fetch both PV-scoped (via heatmap, requires URL filter)
+  // and session-scoped (via getInsightsMetrics, always available). Callers
+  // pick based on the question — single-page experiment analysis wants
+  // pageViewScrollDepth; "match the dashboard card" wants sessionScrollDepth.
   const scrollDepthRequested = metrics.includes("scrollDepth");
-  const scrollPromise: Promise<number> = scrollDepthRequested
-    ? (filters.tagKey || filters.tagValue)
-      ? fetchScrollDepthViaApiV2(filtersStr, projectId).then((v) => {
-          warnings.push("scrollDepth: variant-filtered queries return a per-session number including 0-scroll page views; this differs from non-variant queries which use the dashboard's per-scroller calculation.");
-          return v;
-        })
-      : fetchScrollDepthViaNL(filters, range).then((res) => {
-          if (res.warning) warnings.push(res.warning);
-          return res.value;
-        })
+  const sessionScrollPromise: Promise<number> = scrollDepthRequested
+    ? fetchSessionScrollDepth(filtersStr, projectId)
     : Promise.resolve(0);
+  const pvScrollPromise: Promise<Awaited<ReturnType<typeof fetchScrollDepthFromHeatmap>> | null> = scrollDepthRequested
+    ? fetchScrollDepthFromHeatmap({ filters, range, projectId })
+    : Promise.resolve(null);
 
   // Everything else: standard /api/v2 fan-out.
   const apiV2Metrics = metrics.filter((m): m is Exclude<MetricKeyType, "scrollDepth"> => m !== "scrollDepth");
@@ -336,7 +396,7 @@ export async function queryMetrics(input: QueryMetricsInputType): Promise<QueryM
     }),
   );
 
-  const scrollDepthValue = await scrollPromise;
+  const [sessionScroll, pvScroll] = await Promise.all([sessionScrollPromise, pvScrollPromise]);
 
   const out: QueryMetricsOutput = {
     filters,
@@ -344,7 +404,13 @@ export async function queryMetrics(input: QueryMetricsInputType): Promise<QueryM
   };
 
   if (scrollDepthRequested) {
-    out.scrollDepth = scrollDepthValue;
+    out.sessionScrollDepth = sessionScroll;
+    if (pvScroll) {
+      out.pageViewScrollDepth = pvScroll.pageViewScrollDepth;
+      out.scrollReachThresholds = pvScroll.thresholds;
+    } else if (!filters.url?.length) {
+      warnings.push("pageViewScrollDepth: omitted — pass `filters.url` to get page-view-scoped scroll depth from the heatmap endpoint. sessionScrollDepth (returned) is the dashboard's session-level number.");
+    }
   }
 
   // Rename the friction metric keys on the way out so the response is
@@ -561,5 +627,265 @@ export async function compareByVariant(input: CompareByVariantInputType): Promis
     additionalFilters: parsed.additionalFilters ?? {},
     dateRange: { start: range.start.toISOString(), end: range.end.toISOString() },
     variants: variantResults,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// get-click-elements: per-element click breakdown from the heatmap endpoint
+// ---------------------------------------------------------------------------
+
+const ClickType = z.enum(["all", "dead", "rage", "error", "first", "last"]);
+type ClickTypeT = z.infer<typeof ClickType>;
+
+const Device = z.enum(["mobile", "desktop"]);
+type DeviceT = z.infer<typeof Device>;
+
+const CLICK_TYPE_TO_HEATMAP: Record<ClickTypeT, number> = {
+  all: 0,
+  dead: 3,
+  rage: 4,
+  error: 9,
+  first: 5,
+  last: 6,
+};
+
+const DEVICE_TO_INT: Record<DeviceT, number> = {
+  mobile: 0,
+  desktop: 1,
+};
+
+export const GetClickElementsInputShape = {
+  url: z.string().url().describe("The page URL to analyze, e.g., https://example.com/landing"),
+  clickType: ClickType.describe(
+    "all = every click; dead = clicks that did nothing; rage = repeated frustrated clicks; " +
+    "error = clicks that preceded a JS error; first = first click per session; last = last click before bailout",
+  ),
+  device: Device.optional().default("mobile"),
+  filters: z.object({
+    tagKey: z.string().optional(),
+    tagValue: z.string().optional(),
+  }).optional(),
+  dateRange: z.string().optional(),
+  limit: z.number().int().min(1).max(100).optional().default(20),
+};
+
+export const GetClickElementsInput = z.object(GetClickElementsInputShape);
+export type GetClickElementsInputType = z.input<typeof GetClickElementsInput>;
+
+interface ClickElementRow {
+  rank: number;
+  hash: string;
+  clicks: number;
+  percentOfTotal: number;
+  /**
+   * Approximate position on the page, normalized to 0..1 against the max
+   * observed coordinate across all elements in this response. Marked
+   * `experimental` in the warnings — Clarity's coord scale appears to be
+   * ~30000 = 100% of dimension but is not officially documented; relative
+   * normalization gives stable region labels but absolute coords should
+   * not be relied on.
+   */
+  avgX: number;
+  avgY: number;
+  /** Coarse 3×3 region label derived from avgX/avgY thirds. */
+  region: string;
+  aboveFold: boolean;
+}
+
+interface GetClickElementsOutput {
+  url: string;
+  clickType: ClickTypeT;
+  device: DeviceT;
+  dateRange: { start: string; end: string };
+  filters: { tagKey?: string; tagValue?: string };
+  pageViews: number;
+  totalClicks: number;
+  pageWidthPx: number | null;
+  pageHeightPx: number | null;
+  elements: ClickElementRow[];
+  /** Deep link to the live Clarity heatmap with the same filters applied. */
+  dashboardUrl: string;
+  /** Deep link to recordings filtered to the same variant + date range. */
+  recordingsUrl: string;
+  warnings: string[];
+}
+
+interface RawElement {
+  hash?: string;
+  totalclicks?: number;
+  x?: number[];
+  y?: number[];
+  selector?: string | null;
+}
+
+function regionLabel(avgX: number, avgY: number): string {
+  const xb = avgX < 1 / 3 ? "left" : avgX < 2 / 3 ? "center" : "right";
+  const yb = avgY < 1 / 3 ? "top" : avgY < 2 / 3 ? "middle" : "bottom";
+  return `${yb}-${xb}`;
+}
+
+function buildDashboardUrl(args: {
+  url: string;
+  filters: { tagKey?: string; tagValue?: string };
+  device: DeviceT;
+  heatmapType: number;
+  dateRange: string | undefined;
+}): string {
+  const projectId = process.env.CLARITY_PROJECT_ID || "w3y4c1nfgk";
+  const params = new URLSearchParams();
+  // The dashboard's URL filter format is "2;6;<regex>" — captured live.
+  params.set("URL", `2;6;^${args.url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\?.*)?$`);
+  if (args.filters.tagKey && args.filters.tagValue) {
+    params.set("Variables", `${args.filters.tagKey}:${args.filters.tagValue}`);
+  }
+  params.set("date", args.dateRange ?? "Last 7 days");
+  params.set("heatmapDeviceType", String(DEVICE_TO_INT[args.device]));
+  params.set("heatmapType", String(args.heatmapType));
+  return `https://clarity.microsoft.com/projects/view/${projectId}/heatmaps?${params.toString()}`;
+}
+
+function buildRecordingsUrl(args: {
+  filters: { tagKey?: string; tagValue?: string };
+  dateRange: string | undefined;
+}): string {
+  const projectId = process.env.CLARITY_PROJECT_ID || "w3y4c1nfgk";
+  const params = new URLSearchParams();
+  if (args.filters.tagKey && args.filters.tagValue) {
+    params.set("Variables", `${args.filters.tagKey}:${args.filters.tagValue}`);
+  }
+  params.set("date", args.dateRange ?? "Last 7 days");
+  return `https://clarity.microsoft.com/projects/view/${projectId}/recordings?${params.toString()}`;
+}
+
+export async function getClickElements(input: GetClickElementsInputType): Promise<GetClickElementsOutput> {
+  const parsed = GetClickElementsInput.parse(input);
+  const range = parseDateRange(parsed.dateRange);
+  const projectId = getProjectId();
+  const heatmapType = CLICK_TYPE_TO_HEATMAP[parsed.clickType];
+  const deviceInt = DEVICE_TO_INT[parsed.device];
+
+  const filter = buildHeatmapFilter({
+    url: parsed.url,
+    dateRange: range,
+    tagKey: parsed.filters?.tagKey,
+    tagValue: parsed.filters?.tagValue,
+  });
+
+  const warnings: string[] = [];
+
+  const response = await postGraphQL(
+    GET_HEATMAP_TYPE_DATA.operationName,
+    GET_HEATMAP_TYPE_DATA.query,
+    {
+      projectId,
+      filter,
+      version: "",
+      deviceType: deviceInt,
+      heatmapType,
+      useHashAlpha: false,
+      includeIncompleteSessions: false,
+      includePageQualityIssuesSessions: false,
+    },
+  );
+  const info = (response as { data?: { projectFeatures?: { heatmapTypeInfo?: {
+    elementMapInfo?: string | Record<string, RawElement> | null;
+    totalClicks?: number | null;
+    pageViews?: number;
+    avgFold?: number | null;
+  } | null } } })?.data?.projectFeatures?.heatmapTypeInfo;
+
+  const baseOutput = {
+    url: parsed.url,
+    clickType: parsed.clickType,
+    device: parsed.device,
+    dateRange: { start: range.start.toISOString(), end: range.end.toISOString() },
+    filters: { tagKey: parsed.filters?.tagKey, tagValue: parsed.filters?.tagValue },
+    dashboardUrl: buildDashboardUrl({ url: parsed.url, filters: parsed.filters ?? {}, device: parsed.device, heatmapType, dateRange: parsed.dateRange }),
+    recordingsUrl: buildRecordingsUrl({ filters: parsed.filters ?? {}, dateRange: parsed.dateRange }),
+  };
+
+  if (!info) {
+    // Empty data — Clarity returns null heatmapTypeInfo when there's no data
+    // for the filter (e.g., zero rage clicks in window for this variant).
+    warnings.push(`No ${parsed.clickType} click data found for the given filter. Open dashboardUrl to verify directly.`);
+    return {
+      ...baseOutput,
+      pageViews: 0,
+      totalClicks: 0,
+      pageWidthPx: null,
+      pageHeightPx: null,
+      elements: [],
+      warnings,
+    };
+  }
+
+  // Fetch page dims in parallel with element parsing
+  const payloadPromise = postGraphQL(
+    "getHeatmapPayload",
+    "query getHeatmapPayload($projectId: String!, $filter: String, $deviceType: Int, $useHashAlpha: Boolean, $includePageQualityIssuesSessions: Boolean, $includeIncompleteSessions: Boolean) {\n  projectFeatures(id: $projectId) {\n    id\n    heatmapPayload(serializedFilter: $filter, deviceType: $deviceType, useHashAlpha: $useHashAlpha, includePageQualityIssuesSessions: $includePageQualityIssuesSessions, includeIncompleteSessions: $includeIncompleteSessions) {\n      width\n      height\n      __typename\n    }\n    __typename\n  }\n}\n",
+    { projectId, filter, deviceType: deviceInt, useHashAlpha: false, includeIncompleteSessions: false, includePageQualityIssuesSessions: false },
+  ).catch(() => null);
+
+  const elementsRaw: Record<string, RawElement> =
+    typeof info.elementMapInfo === "string"
+      ? (info.elementMapInfo.trim().length > 0 ? JSON.parse(info.elementMapInfo) : {})
+      : (info.elementMapInfo ?? {});
+
+  const totalClicks = info.totalClicks ?? 0;
+  const pageViews = info.pageViews ?? 0;
+
+  // Compute avg coords + global max for normalization
+  const elementSummaries = Object.entries(elementsRaw)
+    .map(([hash, el]) => {
+      const xs = el.x ?? [];
+      const ys = el.y ?? [];
+      const clicks = el.totalclicks ?? xs.length;
+      if (clicks === 0 || xs.length === 0 || ys.length === 0) return null;
+      const xMean = xs.reduce((a, b) => a + b, 0) / xs.length;
+      const yMean = ys.reduce((a, b) => a + b, 0) / ys.length;
+      return { hash, clicks, xMean, yMean };
+    })
+    .filter((e): e is { hash: string; clicks: number; xMean: number; yMean: number } => e !== null);
+
+  const maxX = Math.max(0, ...elementSummaries.map((e) => e.xMean));
+  const maxY = Math.max(0, ...elementSummaries.map((e) => e.yMean));
+
+  const payload = await payloadPromise;
+  const dims = (payload as { data?: { projectFeatures?: { heatmapPayload?: { width?: number; height?: number } } } })?.data?.projectFeatures?.heatmapPayload;
+  const pageWidthPx = dims?.width ?? null;
+  const pageHeightPx = dims?.height ?? null;
+  const avgFold = info.avgFold ?? null;
+
+  const sorted = [...elementSummaries].sort((a, b) => b.clicks - a.clicks).slice(0, parsed.limit);
+  const elements: ClickElementRow[] = sorted.map((e, idx) => {
+    const avgX = maxX > 0 ? e.xMean / maxX : 0;
+    const avgY = maxY > 0 ? e.yMean / maxY : 0;
+    return {
+      rank: idx + 1,
+      hash: e.hash,
+      clicks: e.clicks,
+      percentOfTotal: totalClicks > 0 ? Number(((e.clicks / totalClicks) * 100).toFixed(1)) : 0,
+      avgX: Number(avgX.toFixed(3)),
+      avgY: Number(avgY.toFixed(3)),
+      region: regionLabel(avgX, avgY),
+      // aboveFold: avgFold and yMean appear to use compatible-but-not-identical
+      // scales. Treat as best-effort. If avgFold or maxY is missing, default false.
+      aboveFold: avgFold != null && maxY > 0 ? e.yMean < avgFold * (maxY / (pageHeightPx ?? maxY)) : false,
+    };
+  });
+
+  warnings.push(
+    "Element selectors are not exposed by Clarity's /api/v2 — only opaque hashes. Open dashboardUrl to see selectors / hover for element details.",
+    "avgX, avgY, region, and aboveFold are experimental: Clarity's coordinate scale is not officially documented. Relative ordering is stable; absolute positions should not be relied on.",
+  );
+
+  return {
+    ...baseOutput,
+    pageViews,
+    totalClicks,
+    pageWidthPx,
+    pageHeightPx,
+    elements,
+    warnings,
   };
 }

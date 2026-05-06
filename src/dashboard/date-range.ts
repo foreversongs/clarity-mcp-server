@@ -6,24 +6,12 @@ export interface DateRange {
 }
 
 /**
- * Format a UTC Date as a naive ET wall-clock string ("YYYY-MM-DDTHH:mm:ss.sss",
- * no timezone designator). The dashboard's filter envelope expects this format
- * for `minEnqueuedTimestamp` Range values; sending ISO-Z strings produces
- * slightly off counts because of how the backend bucket-aligns timestamps.
+ * Format a Date as a full UTC ISO timestamp ("YYYY-MM-DDTHH:mm:ss.sssZ").
+ * The dashboard's `/api/v2` filter envelope expects timestamps in this shape
+ * for `minEnqueuedTimestamp` Range values; the server interprets them as UTC.
  */
-export function formatNaiveET(d: Date): string {
-  const fmt = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ,
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", second: "2-digit",
-    fractionalSecondDigits: 3, hour12: false,
-  });
-  const parts = fmt.formatToParts(d);
-  const get = (t: string) => parts.find((p) => p.type === t)!.value;
-  // en-CA hour can be "24" at midnight; normalize to "00".
-  const hour = get("hour") === "24" ? "00" : get("hour");
-  const ms = get("fractionalSecond") ?? "000";
-  return `${get("year")}-${get("month")}-${get("day")}T${hour}:${get("minute")}:${get("second")}.${ms}`;
+export function formatTimestamp(d: Date): string {
+  return d.toISOString();
 }
 
 /**
@@ -68,8 +56,13 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export function parseDateRange(input?: string): DateRange {
   const now = new Date();
+  // "last N days" is a rolling instant-arithmetic window from `now` back
+  // exactly N×24h. Matches the dashboard's "Last N days" filter.
+  // "today" / "yesterday" / explicit ISO ranges are ET-day-aligned: those
+  // phrasings refer to calendar days in the project's timezone (ET), so
+  // day-alignment is the semantically correct interpretation.
   if (!input || input.trim() === "" || input === "last 7 days") {
-    return { start: startOfDayET(new Date(now.getTime() - 7 * 24 * 3600_000)), end: now };
+    return { start: new Date(now.getTime() - 7 * 24 * 3600_000), end: now };
   }
   if (input === "today") return { start: startOfDayET(now), end: now };
   if (input === "yesterday") {
@@ -80,7 +73,7 @@ export function parseDateRange(input?: string): DateRange {
   if (lastN) {
     const n = Number(lastN[1]);
     if (n < 1 || n > 90) throw new Error(`Invalid dateRange: ${input}. Examples: 'last 7 days', 'yesterday', '2026-04-29..2026-05-01'`);
-    return { start: startOfDayET(new Date(now.getTime() - n * 24 * 3600_000)), end: now };
+    return { start: new Date(now.getTime() - n * 24 * 3600_000), end: now };
   }
   const range = input.match(/^(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})$/);
   if (range) {
