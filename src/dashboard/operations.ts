@@ -173,3 +173,31 @@ export const GET_RECORDINGS: Operation = {
   query: "query getRecordings($projectId: String!, $filters: String, $sortField: String, $limit: Int, $isAppProject: Boolean, $includePageQualityIssuesSessions: Boolean) { /* PROVISIONAL — verify via live capture */ projectFeatures(id: $projectId) { id recordings(filters: $filters, sortField: $sortField, limit: $limit, isAppProject: $isAppProject, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) { items { link timestamp totalDuration activeDuration pagesCount sessionClickCount country device url __typename } __typename } __typename } }",
   responseExtractPath: "data.projectFeatures.recordings.items",
 };
+
+/**
+ * GET_HEATMAP_TYPE_DATA: per-page-view heatmap data (clicks, scroll,
+ * dead/rage/error clicks, etc.). The `heatmapType` integer selects the lens
+ * — see src/dashboard/tools.ts for the mapping. `elementMapInfo` is
+ * returned as a string-encoded JSON blob keyed by element hash; parse before
+ * use. Returns null `heatmapTypeInfo` when there's no data for the filter
+ * (treat as empty result). Captured verbatim under Playwright on 2026-05-06.
+ */
+export const GET_HEATMAP_TYPE_DATA: Operation = {
+  operationName: "getHeatmapTypeData",
+  query: "query getHeatmapTypeData($projectId: String!, $filter: String, $deviceType: Int, $version: String, $heatmapType: Int, $useHashAlpha: Boolean, $includePageQualityIssuesSessions: Boolean, $includeIncompleteSessions: Boolean) {\n  projectFeatures(id: $projectId) {\n    id\n    heatmapTypeInfo(serializedFilter: $filter, deviceType: $deviceType, version: $version, heatmapType: $heatmapType, useHashAlpha: $useHashAlpha, includePageQualityIssuesSessions: $includePageQualityIssuesSessions, includeIncompleteSessions: $includeIncompleteSessions) {\n      elementMapInfo\n      scrollMapInfo {\n        scrollReachY\n        cumulativeSum\n        percUsers\n        __typename\n      }\n      attentionMapInfo {\n        startElementHash\n        endElementHash\n        timeSpent\n        __typename\n      }\n      elementToShow\n      totalClicks\n      avgFold\n      pageViews\n      __typename\n    }\n    __typename\n  }\n}\n",
+  responseExtractPath: "data.projectFeatures.heatmapTypeInfo",
+};
+
+/**
+ * GET_HEATMAP_PAYLOAD: page snapshot for a sample impression — width, height,
+ * URL, and the raw mutation-event `payloads` Clarity uses to rebuild DOM in
+ * the dashboard's heatmap iframe. We use it for `width`/`height` (needed for
+ * coordinate normalization in click-elements output). The `payloads` array is
+ * not consumed (would require implementing Clarity's player to extract DOM
+ * structure / selectors).
+ */
+export const GET_HEATMAP_PAYLOAD: Operation = {
+  operationName: "getHeatmapPayload",
+  query: "query getHeatmapPayload($projectId: String!, $filter: String, $deviceType: Int, $useHashAlpha: Boolean, $includePageQualityIssuesSessions: Boolean, $includeIncompleteSessions: Boolean) {\n  projectFeatures(id: $projectId) {\n    id\n    heatmapPayload(serializedFilter: $filter, deviceType: $deviceType, useHashAlpha: $useHashAlpha, includePageQualityIssuesSessions: $includePageQualityIssuesSessions, includeIncompleteSessions: $includeIncompleteSessions) {\n      width\n      height\n      url\n      sampleImpression {\n        timestamp\n        __typename\n      }\n      __typename\n    }\n    __typename\n  }\n}\n",
+  responseExtractPath: "data.projectFeatures.heatmapPayload",
+};
