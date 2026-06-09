@@ -1,171 +1,77 @@
 import {
-  ANALYTICS_DASHBOARD_TOOL,
+  COMPARE_BY_VARIANT_TOOL,
   DOCUMENTATION_TOOL,
-  SESSION_RECORDINGS_TOOL
+  GET_CLICK_ELEMENTS_TOOL,
+  QUERY_METRICS_TOOL,
+  SESSION_RECORDINGS_TOOL,
+  TAG_DISCOVERY_TOOL,
 } from "./constants.js";
 
 export const SYSTEM_INSTRUCTIONS_PROMPT = `
-This MCP server provides access to Microsoft Clarity analytics dashboard data, documentation resources and session recordings.
+This MCP server provides Microsoft Clarity dashboard data and documentation.
 
-## Available Tools
+## Tool Surface
 
-### 1. Session Recordings Tool: \`${SESSION_RECORDINGS_TOOL}\`
-Lists Microsoft Clarity session recordings with metadata including session links, duration, and user interaction timelines.
+### Data tools (cookie auth via CLARITY_DASHBOARD_COOKIE)
 
-**Parameters:**
-- filters: Optional filters for sessions (date range, device type, etc.)
-- sortBy: Sort option using SortOptions enum (default: SessionStart_DESC)
-- count: Number of sessions to retrieve (1-250, default: 100)
+#### \`${TAG_DISCOVERY_TOOL}\`
+Returns the list of custom-tag *keys* defined for the project (e.g. ["my_experiment", "checkout_error_code", ...]).
+Use this when you don't know which experiment tags exist for the project.
 
-**Sort Options:**
-- SessionStart_DESC (newest first - default)
-- SessionStart_ASC (oldest first)
-- SessionDuration_ASC (shortest duration first)
-- SessionDuration_DESC (longest duration first)
-- SessionClickCount_ASC (fewest clicks first)
-- SessionClickCount_DESC (most clicks first)
-- PageCount_ASC (fewest pages first)
-- PageCount_DESC (most pages first)
+#### \`${QUERY_METRICS_TOOL}\`
+Typed dashboard metrics for any combination of filters. Use this for ANY aggregate metric question — variant or not.
 
-**Example Usage:**
-- Get 10 newest sessions: { "count": 10, "sortBy": "SessionStart_DESC" }
-- Get 20 longest sessions from date range: { "filters": { "date": { "start": "2024-01-01T00:00:00.000Z", "end": "2024-01-31T23:59:59.999Z" } }, "sortBy": "SessionDuration_DESC", "count": 20 }
-- Get 15 mobile sessions with most clicks: { "filters": { "deviceType": ["Mobile"] }, "sortBy": "SessionClickCount_DESC", "count": 15 }
-- Get oldest sessions first: { "sortBy": "SessionStart_ASC", "count": 100 }
-- Get sessions with most page views: { "sortBy": "PageCount_DESC", "count": 100 }
+Filter dimensions include: \`url\`, \`device\`, \`browser\`, \`os\`, \`country\`, \`state\`, \`city\`, \`channel\`, \`source\`, \`medium\`, \`campaign\`, \`smartEvents\`, \`javascriptErrors\`, \`scrollDepth\` (range), \`sessionDuration\` (range), \`pagesCount\` (range), and the variant filters \`tagKey\`+\`tagValue\`.
 
-### 2. Analytics Dashboard Tool: \`${ANALYTICS_DASHBOARD_TOOL}\`
-This tool is your **primary and authoritative data source** for all dashboard-related insights and must be used to retrieve accurate, real-time data from the Microsoft Clarity dashboard.
+Metrics: \`sessions\`, \`newVsReturning\`, \`topReferrers\`, \`topPages\`, \`scrollDepth\`, \`deadClicks\`, \`rageClicks\`, \`jsErrors\`, \`topDeadClickTargets\`, \`topClickedElements\`. Default: all.
 
-#### Capabilities & Output
+Date range: accepts \`"last 7 days"\` (default), \`"yesterday"\`, \`"today"\`, \`"last N days"\` (1-90), \`"YYYY-MM-DD..YYYY-MM-DD"\`.
 
-Microsoft Clarity dashboard provides comprehensive insights into the behavior and performance of the website, including:
-- **User Analytics**: Unique and returning users, sessions, device types, browsers, operating systems
-- **Geographic Data**: Countries, regions, traffic sources
-- **Content Performance**: Popular pages, referrers, channels, campaigns, sources
-- **User Behavior**: Smart events (Contact Us, Submit, etc.), scroll depth, click patterns
-- **Technical Metrics**: JavaScript errors, URL performance
-- **Performance Indicators**: Core Web Vitals (largest contentful paint, first input delay, cumulative layout shift)
-- **User Experience**: Quick backs, dead clicks, rage clicks, session duration
+**Scroll depth — reporting:** Always pass \`filters.url\` when scroll depth is requested. Report \`pageViewScrollDepth\` as "scroll depth" — that's the canonical answer. When the user's question is specifically about scroll behavior or page engagement (e.g. "how deep do people scroll on this page?", "are users reaching the section below the fold?"), you may also include \`scrollReachThresholds\` framed as concrete reach percentages — they often answer the real question better than the average. Skip the thresholds in broad multi-metric summaries where scroll depth is one item among many. Do NOT volunteer \`sessionScrollDepth\` or the page-view-vs-session distinction in any case unless the user explicitly asks about session-level scroll or how the number compares to the Clarity dashboard card.
 
-The dashboard helps website owners understand their audience, traffic sources, content preferences, user engagement patterns, and identify potential technical issues.
+#### \`${SESSION_RECORDINGS_TOOL}\`
+Typed session-recording list with the same filter union as \`${QUERY_METRICS_TOOL}\`. Returns up to 250 recordings with \`playerUrl\` + metadata. Sort options: \`newest\` (default), \`oldest\`, \`longest\`, \`shortest\`, \`most-clicks\`, \`most-pages\`.
 
-**IMPORTANT GUIDELINES:**
-- Use SIMPLE, SINGLE-PURPOSE queries only
-- Always specify time ranges, full URLs and parameters explicitly; prompt the user if not provided
-- Break complex requests into multiple separate queries
-- Focus on ONE trend or aggregated metric per query
+#### \`${COMPARE_BY_VARIANT_TOOL}\`
+Convenience: comparison table for one experiment. Auto-discovers values for the given \`tagKey\`, queries each, and computes deltas vs. control.
 
-**Good Examples:**
-- "Page views count for the last 7 days"
-- "Top javascript errors for PC in January 2024"
-- "Top pages for mobile in the last 3 days"
-- "Distinct users visited https://www.example.com page last month?"
-- "Average session duration for desktop users this week?"
+Use for variant comparison reports specifically. For single-variant questions or non-variant questions, use \`${QUERY_METRICS_TOOL}\` directly.
 
-**Bad Examples (DON'T DO THIS):**
-- "Show me page views, average session duration, and conversion data for all devices across multiple pages with user demographics" (too complex, multiple purposes)
-- "Analyze user behavior" (too vague, no time range)
-- "Get all metrics" (too broad)
+#### \`${GET_CLICK_ELEMENTS_TOOL}\`
+Per-element click breakdown for a specific page. Answers "where on the page are dead clicks happening?" or "what's the most-clicked element on variant B vs A?" \`clickType\` selects the lens:
 
-**Best Practices:**
-✅ Be specific about time ranges
-✅ Focus on one metric per query
-✅ Specify device type, page, or user segment when relevant
-✅ Use clear, actionable language
+- \`all\` — every recorded click (most-clicked elements ranked)
+- \`dead\` — clicks that triggered no JS / DOM action
+- \`rage\` — repeated frustration clicks in same area
+- \`error\` — click that preceded a JS error within ~1s
+- \`first\` — first click per session (top-of-mind action)
+- \`last\` — last click before bailout
 
-❌ Don't combine multiple unrelated metrics
-❌ Don't use vague or overly broad queries
-❌ Don't omit time ranges
-❌ Don't ask for "everything" or "all data"
+Variant-filterable via \`filters.tagKey\`/\`tagValue\`. Returns ranked elements with click counts and a 3×3 region label (\`top-left\`, \`middle-center\`, etc.).
 
-### 3. Documentation Tool: \`${DOCUMENTATION_TOOL}\`
+**Important caveats** (also in the response \`warnings\`):
+- Clarity's API does **not** expose CSS selectors — only opaque element hashes. To identify a specific element visually, open the \`dashboardUrl\` returned in the response.
+- \`avgX\`, \`avgY\`, \`region\`, and \`aboveFold\` are **experimental**: Clarity's coordinate scale isn't officially documented. Relative ordering across elements is reliable, absolute positions should not be relied on.
+- \`heatmapTypeInfo\` may be null for sparse data (e.g., zero rage clicks for a small variant). The tool returns an empty \`elements\` array and a warning in that case.
 
-This tool is your **primary and authoritative data source** for all documentation-related questions and must be used to retrieve accurate, real-time data from the Microsoft Clarity documentation.
+When asked "where are the dead clicks coming from on this page?" → use this tool with \`clickType: "dead"\`. Do NOT infer from a DOM scan against \`cursor: pointer\` — that approach has false positives in React apps because \`onClick\` props don't appear as DOM attributes.
 
-#### Capabilities & Output
+### Documentation tool (bearer auth via CLARITY_API_TOKEN)
 
-Microsoft Clarity documentation provides comprehensive, authoritative answers to every aspect of Clarity including step-by-step screenshots for setup guides, features, usage, troubleshooting, and integration instructions. The tool covers all topics and headlines from the official documentation, including:
+#### \`${DOCUMENTATION_TOOL}\`
+RAG over Microsoft Clarity documentation. Use for "how does X work" questions about Clarity itself.
 
-- **Getting Started & Installation**
-	- About Clarity
-	- Sign up for Clarity
-	- Setup and install Clarity code
-	- Verify your installation
-	- Setup via third-party platforms (WordPress, Wix, Shopify, etc.)
-	- Setup for Vibe Coding Platforms
-	- Privacy disclosure wording
-	- Data retention
-	- Cookies and consent management (including Consent Mode)
-	- troubleshooting installation
+## Routing rules
 
-- **Clarity for Mobile Apps**
-	- Android SDK
-	- iOS SDK
-	- React Native SDK
-	- Flutter SDK
-	- Cordova and Ionic SDK
+- For ANY aggregate metric question: use \`${QUERY_METRICS_TOOL}\` or \`${SESSION_RECORDINGS_TOOL}\`. Variant filters are just two optional fields (\`tagKey\`, \`tagValue\`) within the same filter union.
+- For variant comparison reports: use \`${COMPARE_BY_VARIANT_TOOL}\`.
+- For element-level questions ("where are the clicks/dead clicks/rage clicks happening on this page?"): use \`${GET_CLICK_ELEMENTS_TOOL}\`.
+- For "what tags exist": use \`${TAG_DISCOVERY_TOOL}\`.
+- For Clarity-doc questions: use \`${DOCUMENTATION_TOOL}\`.
 
-- **Dashboard & Insights**
-	- Insights overview
-	- Dashboard features
-	- E-commerce features
-	- Blog features
-	- Recipe features
+## Error handling
 
-- **Session Recordings**
-	- What is a session recording?
-	- Session list
-	- Inline player
-	- Live recordings
-	- Visitor profile
+If you see "Clarity dashboard session expired", relay the message to the user — \`CLARITY_DASHBOARD_COOKIE\` needs to be rotated. The data tools will not work until a fresh cookie is supplied via the runtime configuration (env var, CLI flag, or whatever mechanism the deployment uses).
 
-- **Heatmaps**
-	- What is a heatmap?
-	- Heatmap features
-	- Click maps
-	- Scroll maps
-	- Area maps
-
-- **Filters & Segments**
-	- Filters overview
-	- Exclusion filters
-	- Segments
-	- Regular expressions
-
-- **Settings & Management**
-	- Account management
-	- Team management
-	- Masking
-	- IP blocking
-	- Funnels
-	- Smart events
-
-- **Copilot in Clarity**
-	- Copilot overview
-	- Copilot chat
-	- Session insights
-	- Grouped session insights
-	- Heatmaps insights
-
-- **Reference**
-	- API Reference
-	- Identify API
-	- Export API
-	- Custom tags
-	- Troubleshooting (installation, settings, recordings, heatmaps, dashboard, live extension)
-	- FAQ
-	- Glossary of terms
-	- Share Clarity
-	- Download Clarity
-
-- **Additional Links & Resources**
-	- Blog
-	- Case studies
-	- Demo
-	- Previous versions
-	- Contribute
-	- Privacy, Terms of Use, Trademarks
-
-The documentation plugin helps users answer frequently asked questions for every headline and topic listed in the official Microsoft Clarity documentation, supporting all use cases, troubleshooting, integrations, and advanced features.
+If you see "Clarity API token not set", the documentation tool can't run. The data tools may still work.
 `;

@@ -1,22 +1,28 @@
 {
-  "name": "@microsoft/clarity-mcp-server",
-  "version": "2.0.2",
-  "description": "MCP Server for Microsoft Clarity based on data export API",
-  "author": "Microsoft",
+  "name": "@foreversongs/clarity-mcp-server-fork",
+  "version": "3.1.0",
+  "description": "MCP server for Microsoft Clarity, extended with dashboard /api/v2 access and custom-tag (variant) filtering",
   "license": "MIT",
   "type": "module",
-  "main": "dist/index.js",
-  "homepage": "https://clarity.microsoft.com/",
+  "main": "dist/src/index.js",
+  "homepage": "https://github.com/foreversongs/clarity-mcp-server",
   "repository": {
     "type": "git",
-    "url": "https://github.com/microsoft/clarity-mcp-server"
+    "url": "https://github.com/foreversongs/clarity-mcp-server.git"
   },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "restricted"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "keywords": [
     "clarity",
     "behavior-analytics-tools",
-    "heatmaps",
     "session-recordings",
-    "insights",
     "analytics",
     "mcp",
     "model-context-protocol",
@@ -24,12 +30,15 @@
     "agents"
   ],
   "bin": {
-    "clarity-mcp-server": "./dist/cli.js"
+    "clarity-mcp-server": "./dist/src/cli.js"
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsc && node dist/index.js",
+    "start": "node dist/src/index.js",
+    "dev": "tsc && node dist/src/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "probe": "tsc && node dist/scripts/probe.js",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
@@ -38,6 +47,8 @@
   },
   "devDependencies": {
     "@types/node": "^20.19.23",
-    "typescript": "^5.9.3"
+    "dotenv": "^17.4.2",
+    "typescript": "^5.9.3",
+    "vitest": "^2.1.8"
   }
 }

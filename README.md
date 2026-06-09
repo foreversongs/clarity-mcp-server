@@ -1,178 +1,127 @@
-# Microsoft Clarity MCP Server
+# Microsoft Clarity MCP Server (fork)
 
-This is a Model Context Protocol (MCP) server for the Microsoft Clarity.
-It allows you to access your session recordings, project analytics, and documentation from Clarity using Claude for Desktop or other MCP-compatible clients.
+Model Context Protocol (MCP) server for Microsoft Clarity. Exposes session recordings, dashboard analytics, custom-tag (variant) filtering, element-level click data, and Clarity documentation as MCP tools — usable from Claude for Desktop, VS Code, and any other MCP-compatible client.
 
-## Key Features
+> This is a fork of [`microsoft/clarity-mcp-server`](https://github.com/microsoft/clarity-mcp-server) maintained for use cases the upstream package does not cover, primarily custom-tag (experiment variant) filtering against the dashboard's `/api/v2` GraphQL endpoint. See [CHANGELOG.md](./CHANGELOG.md) for the full divergence history.
 
-- **Analytics Data Access**: Query your Microsoft Clarity analytics data including traffic metrics, user behavior insights, and performance statistics
-- **Session Recording Retrieval**: Access and analyze session recordings to understand user interactions and identify optimization opportunities
-- **Natural Language Querying**: Ask questions in plain English to get insights from your data - no need to learn complex query syntax or API endpoints
-- **Flexible Data Filtering**: Filter results by various dimensions such as browser, device, country, and many more
-- **Real-Time Data Access**: Fetch the latest analytics data and insights from your Clarity projects on-demand
-- **Documentation Integration**: Get quick answers and guidance from Microsoft Clarity documentation directly within your workflow
-- **Seamless MCP Integration**: Works natively with Claude for Desktop, Visual Studio Code, and other Model Context Protocol (MCP) compatible clients
+## Tool Surface
 
-## Setup and Installation
+The server exposes five tools across two backends.
+
+### Dashboard tools (cookie auth via `CLARITY_DASHBOARD_COOKIE`)
+
+| Tool | Purpose |
+| --- | --- |
+| `list-custom-tags` | List the custom-tag *keys* defined for the project (e.g. experiment names emitted via `clarity('set', ...)` calls). |
+| `query-metrics` | Fetch typed dashboard metrics for any combination of filters: sessions, engagement, top pages/referrers, dead/rage clicks, JS errors, scroll depth. Variant-filterable via `tagKey`/`tagValue`. |
+| `compare-by-variant` | Convenience: comparison table for one experiment. Auto-discovers variant values for the given `tagKey`, queries each, and computes deltas vs. control. |
+| `list-session-recordings` | Typed session-recording list with the same filter union as `query-metrics`. Returns up to 250 recordings with `playerUrl` + metadata. |
+| `get-click-elements` | Per-element click breakdown for a specific page from heatmap data. `clickType` selects the lens: `all`, `dead`, `rage`, `error`, `first`, `last`. Returns ranked elements with click counts, normalized average position, and a 3×3 region label. |
+
+### Documentation tool (bearer auth via `CLARITY_API_TOKEN`)
+
+| Tool | Purpose |
+| --- | --- |
+| `query-documentation-resources` | RAG over the Microsoft Clarity public documentation. Use for "how does X work" questions about Clarity itself. |
+
+### Scroll-depth scope
+
+`query-metrics` returns scroll depth in two flavors:
+
+- **`pageViewScrollDepth`** — page-view-scoped average max scroll % computed from the heatmap endpoint's scroll distribution. Returned only when `filters.url` is provided. The right metric for single-page experiments.
+- **`sessionScrollDepth`** — session-scoped from `getInsightsMetrics`. Always returned. Matches the dashboard's "Scroll depth" card; max scroll across all pages in the session.
+- **`scrollReachThresholds`** — `{ reach25, reach50, reach75, reach100 }`: % of page views reaching at least 25/50/75/100 of the page. More actionable for CRO conversations than a single average. Returned with `pageViewScrollDepth`.
+
+## Setup
 
 ### Prerequisites
 
-- Node.js v16 or higher
-- A Microsoft Clarity account and API token
-- Any MCP-compatible client (Claude for Desktop, etc.)
+- Node.js v20 or higher
+- A Microsoft Clarity project
+- One or both credentials, depending on which tools you need:
+  - **`CLARITY_API_TOKEN`** — for `query-documentation-resources`. Generated in your Clarity project under Settings → Data Export → Generate new API token.
+  - **`CLARITY_DASHBOARD_COOKIE`** — for the data tools. The full `Cookie` header value from a logged-in `clarity.microsoft.com` browser session. The cookie must include the `_csrf=...` value. Cookies rotate every ~30-90 days.
+  - **`CLARITY_PROJECT_ID`** — the alphanumeric ID from the dashboard URL (e.g. `w3y4c1nfgk`). Required for the data tools.
 
 ### Installation
 
-#### Option 1: Install via npm (recommended)
-
-You can install and run this package directly using npm:
+Published to GitHub Packages under the `@foreversongs` scope. Configure npm to authenticate against `npm.pkg.github.com` for that scope, then:
 
 ```bash
-# Install globally
-npm install -g @microsoft/clarity-mcp-server
-
-# Run the server
-clarity-mcp-server
+npm install -g @foreversongs/clarity-mcp-server-fork
+clarity-mcp-server --clarity_api_token=your-token
 ```
 
-#### Option 2: Run with npx without installing
-
-You can run the server directly using npx without installing:
+Or build from source:
 
 ```bash
-npx @microsoft/clarity-mcp-server
+git clone https://github.com/foreversongs/clarity-mcp-server.git
+cd clarity-mcp-server
+npm install
+npm run build
+npm start
 ```
 
-With either option, you can provide your Clarity API token using the `--clarity_api_token` parameter:
+### Environment variables
 
 ```bash
-npx @microsoft/clarity-mcp-server --clarity_api_token=your-token-here
+export CLARITY_API_TOKEN="<your-token>"
+export CLARITY_DASHBOARD_COOKIE="<full-cookie-string-including-_csrf>"
+export CLARITY_PROJECT_ID="<project-id>"
 ```
 
-#### Option 3: Manual Installation
+`CLARITY_API_TOKEN` may also be supplied via `--clarity_api_token=...` on the command line.
 
-1. Clone or download this repository
-2. Install dependencies:
-   ```
-   npm install
-   ```
-3. Build the TypeScript code:
-   ```
-   npm run build
-   ```
-4. Run the server:
-   ```
-   npm run start
-   ```
-
-### Extension/Plugin Installation
-
-#### Visual Studio Code Extension
-
-[<img src="https://img.shields.io/badge/VS_Code-VS_Code?style=flat-square&label=Install+Server&color=0098FF" alt="Install in VS Code">](https://insiders.vscode.dev/redirect?url=vscode%3Amcp%2Finstall%3F%257B%2522name%2522%253A%2522clarity-server%2522%252C%2522command%2522%253A%2522npx%2522%252C%2522args%2522%253A%255B%2522%2540microsoft%252Fclarity-mcp-server%2522%255D%257D)
-
-Click the button above to install the Microsoft Clarity MCP server directly in Visual Studio Code.
-
-#### Claude Desktop Plugin
-
-Install from Claude's extension gallery:
-
-1. Open **Claude Desktop**
-2. Navigate to **File → Settings → Extensions**
-3. Search for **Microsoft Clarity**
-4. Click **Install** to add the extension
-5. Configure your **API Token**:
-   <br>
-   Follow the instructions in the [API Token section](#api-token) to retrieve and set it up correctly.
-
-## Configuration
-
-You can provide the [Clarity data export API](https://learn.microsoft.com/en-us/clarity/setup-and-installation/clarity-data-export-api) token in two ways:
-
-1. **Command Line Arguments**:
-   ```bash
-   npx @microsoft/clarity-mcp-server --clarity_api_token=your-token
-   ```
-
-2. **Tool Parameters**:
-   <br>
-   Provide `token` as a parameter when calling the `get-clarity-data` tool
-
-## Configuring MCP Clients
-
-### Generic MCP Client Configuration
-
-MCP clients typically require configuration to connect to the server. Here's a general example of how to configure an MCP client:
+### MCP client configuration
 
 ```json
 {
   "mcpServers": {
-    "@microsoft/clarity-mcp-server": {
+    "clarity": {
       "command": "npx",
-      "args": [
-        "@microsoft/clarity-mcp-server",
-        "--clarity_api_token=your-api-token-here"
-      ]
+      "args": ["@foreversongs/clarity-mcp-server-fork"],
+      "env": {
+        "CLARITY_API_TOKEN": "your-api-token",
+        "CLARITY_DASHBOARD_COOKIE": "your-cookie-string",
+        "CLARITY_PROJECT_ID": "your-project-id"
+      }
     }
   }
 }
 ```
 
-The specifics of where and how to add this configuration will depend on your specific MCP client.
+For Claude Desktop, this goes in `claude_desktop_config.json`:
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%AppData%\Claude\claude_desktop_config.json`
 
-### Claude for Desktop Configuration
+## Development
 
-To configure Claude for Desktop to use this server:
+```bash
+npm install
+npm run build       # tsc → dist/
+npm test            # vitest run
+npm run dev         # build + run
+npm run probe       # smoke-test /api/v2 connectivity (requires CLARITY_DASHBOARD_COOKIE)
+```
 
-1. Open your Claude for Desktop configuration file:
-   - **Windows**: `%AppData%\Claude\claude_desktop_config.json`
-   - **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-2. Add the configuration shown in the generic example above
-3. Save the configuration file and restart Claude for Desktop
+`scripts/probe.ts` smoke-tests the dashboard endpoint with the configured cookie and verifies the variant filter is producing distinct results — useful for verifying a freshly-rotated cookie before deploying.
 
-## Server Usage
+## Architecture notes
 
-The server exposes various tools that you can call from any MCP client.
-Just ask naturally and keep each request focused on one thing.
+The dashboard tools talk to `https://clarity.microsoft.com/api/v2`, the same GraphQL endpoint the Clarity dashboard UI uses. Operation strings in `src/dashboard/operations.ts` are captured verbatim from the dashboard's network traffic and copied into the source. If Clarity changes the wire format, recapture and update.
 
-### Query Analytics Dashboard
-- <b>Name:</b> `query-analytics-dashboard`
-- <b>Description:</b> Retrieves analytics data and metrics from your project's dashboard using a simplified natural language search query.
-- <b>Examples:</b>
-  - How many Clarity sessions did we get from Egypt in the past 3 days?
-  - What are the most used browsers in my Clarity project?
-  - Show me traffic metrics from my Clarity project for the last week
+A handful of operations are still **provisional** — flagged in their docstrings — because they were inferred from schema introspection rather than captured live. These currently include `LIST_CUSTOM_TAG_KEYS`, `LIST_CUSTOM_TAG_VALUES`, `GET_TOP_PAGES`, and `GET_RECORDINGS`. If the inferred field names disagree with the live schema, the affected tool will surface a `DashboardHttpError` with an `Unknown field` message — the failure is loud rather than silent, but operators relying on `list-custom-tags`, `compare-by-variant`, or `list-session-recordings` should verify against their live project before depending on the response shape.
 
-### List Session Recordings
-- <b>Name:</b> `list-session-recordings`
-- <b>Description:</b> Lists your project's session recordings based on a specified filtering criteria. The filters allow you to narrow down the recordings by various fields such as URLs, device types, browser, OS, country, city, and more.
-- <b>Examples:</b>
-  - List the most recent Clarity sessions from mobile devices
-  - Show the top 5 Clarity sessions with the highest number of user clicks
-  - Get Clarity recordings where users encountered JavaScript errors
+The filter envelope (`src/dashboard/filters.ts`) handles two distinct shapes:
+- `buildFilterEnvelope` for session-level operations (used by `query-metrics`, `list-session-recordings`, `compare-by-variant`)
+- `buildHeatmapFilter` for page-event-scoped operations (used by `get-click-elements` and the heatmap-based scroll depth path in `query-metrics`)
 
-### Query Documentation Resources
-- <b>Name:</b> `query-documentation-resources`
-- <b>Description:</b> Retrieves snippets from Microsoft Clarity documentation to find answers to user questions including step-by-step screenshots for setup guides, features, usage, troubleshooting, and integration instructions.
-- <b>Examples:</b>
-  - How to track custom events using Microsoft Clarity?
-  - How many labels can I add to a recording in Microsoft Clarity?
+Timestamps are emitted as full UTC ISO (with `Z`). The server interprets naive timestamps as UTC; sending ET wall-clock strings without a designator shifts query windows by the ET offset and undercounts recent traffic on ramping experiments.
 
-## API Token
+## Privacy
 
-### Getting Your API Token
-
-To generate an API token:
-
-1. Go to your Clarity project
-2. Select Settings → Data Export → Generate new API token
-3. Provide a descriptive name for the token
-4. Save the generated token securely
-
-## Privacy Policy
-
-For information about data privacy and usage, please refer to the [Microsoft Clarity Privacy Policy](https://clarity.microsoft.com/privacy).
+For information about data privacy and usage, see the [Microsoft Clarity Privacy Policy](https://clarity.microsoft.com/privacy).
 
 ## License
 
-This project is licensed under the <b>MIT</b> License.
+MIT — same as upstream.
