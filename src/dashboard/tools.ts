@@ -1,8 +1,7 @@
 import { z } from "zod";
 import { postGraphQL, logExtract } from "./client.js";
 import {
-  LIST_CUSTOM_TAG_KEYS,
-  LIST_CUSTOM_TAG_VALUES,
+  EXTRA_FILTERS,
   GET_SESSIONS_INFO,
   GET_NEW_AND_RETURNING,
   GET_TOP_REFERRERS,
@@ -59,26 +58,72 @@ function extractWithLog(op: string, obj: unknown, path: string): unknown {
   return result;
 }
 
-let cachedTags: string[] | null = null;
-
-export async function listCustomTags(): Promise<string[]> {
-  if (cachedTags) return cachedTags;
-  const response = await postGraphQL(
-    LIST_CUSTOM_TAG_KEYS.operationName,
-    LIST_CUSTOM_TAG_KEYS.query,
-    { projectId: getProjectId() },
-  );
-  const tags = extractWithLog(LIST_CUSTOM_TAG_KEYS.operationName, response, LIST_CUSTOM_TAG_KEYS.responseExtractPath);
-  if (!Array.isArray(tags)) {
-    throw new Error(`Unexpected response shape from listCustomTagKeys (operation: ${LIST_CUSTOM_TAG_KEYS.operationName}, expected path: ${LIST_CUSTOM_TAG_KEYS.responseExtractPath}). Response head: ${JSON.stringify(response).slice(0, 200)}`);
-  }
-  cachedTags = tags as string[];
-  return cachedTags;
+/** A custom-tag key plus the values observed for it within the queried window. */
+interface TagVariable {
+  name: string;
+  values: string[];
 }
+
+// Cache keyed by the dateRange input string ("__default__" for an unspecified
+// range). The tag list is date-scoped — a tag only appears if a session in the
+// window carried it — so caching by window (not globally) is required for
+// correctness. Caching by the input string rather than the resolved envelope
+// also keeps repeated same-window calls (e.g. listCustomTags + discoverValues)
+// on a single network request, since the rolling "last N days" envelope's
+// timestamps drift by milliseconds between calls.
+//
+// Entries never expire. The process is short-lived per MCP session, so the only
+// staleness risk is a long-running process serving a stale "__default__"
+// (rolling last-7-days) entry as the window advances or a new tag starts; a
+// caller can force a fresh fetch by passing an explicit dateRange.
+const tagVariablesCache = new Map<string, TagVariable[]>();
+
+/**
+ * Fetch the project's custom-tag keys and their observed values for a window,
+ * via the dashboard's `extraFilters` operation. Both `listCustomTags` and
+ * `compareByVariant`'s value discovery read from this so they share one call.
+ */
+async function fetchTagVariables(dateRange?: string): Promise<TagVariable[]> {
+  const cacheKey = dateRange ?? "__default__";
+  const cached = tagVariablesCache.get(cacheKey);
+  if (cached) return cached;
+
+  const serializedFilter = buildFilterEnvelope({}, parseDateRange(dateRange));
+  const response = await postGraphQL(
+    EXTRA_FILTERS.operationName,
+    EXTRA_FILTERS.query,
+    { projectId: getProjectId(), serializedFilter, tagsType: "UserCustomTags", includePageQualityIssuesSessions: false },
+  );
+  const raw = extractWithLog(EXTRA_FILTERS.operationName, response, EXTRA_FILTERS.responseExtractPath);
+  if (!Array.isArray(raw)) {
+    throw new Error(`Unexpected response shape from ${EXTRA_FILTERS.operationName} (expected array at path '${EXTRA_FILTERS.responseExtractPath}'). Response head: ${JSON.stringify(response).slice(0, 200)}`);
+  }
+  const vars: TagVariable[] = (raw as { name?: string; values?: unknown }[])
+    .map((v) => ({
+      name: String(v.name ?? ""),
+      values: Array.isArray(v.values) ? v.values.map(String) : [],
+    }))
+    // Guard against a malformed/nameless entry yielding a meaningless "" tag key.
+    .filter((v) => v.name !== "");
+  tagVariablesCache.set(cacheKey, vars);
+  return vars;
+}
+
+export async function listCustomTags(dateRange?: string): Promise<string[]> {
+  return (await fetchTagVariables(dateRange)).map((v) => v.name);
+}
+
+export const ListCustomTagsInputShape = {
+  dateRange: z.string().optional().describe(
+    "Window to look for tags in (e.g. 'last 7 days', 'last 30 days', 'yesterday', '2026-05-01..2026-05-31'). " +
+    "Defaults to last 7 days. The list is date-scoped — a tag only appears if a session in the window carried it, " +
+    "so widen the range to surface tags from older/stopped experiments.",
+  ),
+};
 
 // Test-only export so tests can reset the cache between cases.
 export function __resetCacheForTests() {
-  cachedTags = null;
+  tagVariablesCache.clear();
 }
 
 export const QueryMetricsInputShape = {
@@ -553,20 +598,15 @@ interface CompareByVariantOutput {
   variants: VariantRow[];
 }
 
-async function discoverValues(tagKey: string): Promise<string[]> {
-  const response = await postGraphQL(
-    LIST_CUSTOM_TAG_VALUES.operationName,
-    LIST_CUSTOM_TAG_VALUES.query,
-    { projectId: getProjectId(), tagKey },
-  );
-  const raw = extractWithLog(LIST_CUSTOM_TAG_VALUES.operationName, response, LIST_CUSTOM_TAG_VALUES.responseExtractPath);
-  if (!Array.isArray(raw)) {
-    throw new Error(`response shape drift: operation ${LIST_CUSTOM_TAG_VALUES.operationName} did not return array at expected path '${LIST_CUSTOM_TAG_VALUES.responseExtractPath}' for tagKey=${tagKey}`);
+async function discoverValues(tagKey: string, dateRange?: string): Promise<string[]> {
+  const match = (await fetchTagVariables(dateRange)).find((v) => v.name === tagKey);
+  if (!match) {
+    throw new Error(`No custom tag '${tagKey}' found with data in the window '${dateRange ?? "last 7 days"}'. Run list-custom-tags (optionally with a wider dateRange) to see available tags — a stopped experiment may have aged out of the default 7-day window.`);
   }
   // Sort: literal "control" sentinel first; then numerics ascending; then
   // lexicographic. Index 0 becomes the implicit control variant for delta
   // computation downstream.
-  return (raw as string[]).slice().sort((a, b) => {
+  return match.values.slice().sort((a, b) => {
     if (a === "control") return -1;
     if (b === "control") return 1;
     const an = Number(a), bn = Number(b);
@@ -611,7 +651,7 @@ function computeDeltas(variant: QueryMetricsOutput, control: QueryMetricsOutput)
 
 export async function compareByVariant(input: CompareByVariantInputType): Promise<CompareByVariantOutput> {
   const parsed = CompareByVariantInput.parse(input);
-  const values = await discoverValues(parsed.tagKey);
+  const values = await discoverValues(parsed.tagKey, parsed.dateRange);
   const range = parseDateRange(parsed.dateRange);
 
   const variantResults: VariantRow[] = await Promise.all(

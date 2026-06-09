@@ -24,6 +24,7 @@ import { SYSTEM_INSTRUCTIONS_PROMPT } from "./instructions.js";
 import {
   CompareByVariantInputShape,
   GetClickElementsInputShape,
+  ListCustomTagsInputShape,
   ListRecordingsInputShape,
   QueryMetricsInputShape,
   compareByVariant,
@@ -53,11 +54,11 @@ const server = new McpServer(
 server.tool(
   TAG_DISCOVERY_TOOL,
   TAG_DISCOVERY_DESCRIPTION,
-  {},
+  ListCustomTagsInputShape,
   { title: "List Custom Tags", readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-  async () => {
+  async ({ dateRange }) => {
     try {
-      const tags = await listCustomTags();
+      const tags = await listCustomTags(dateRange);
       return { content: [{ type: "text", text: JSON.stringify(tags, null, 2) }] };
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);

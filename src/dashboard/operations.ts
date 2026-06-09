@@ -141,25 +141,20 @@ export const GET_TOP_CLICKED_ELEMENTS: Operation = {
 };
 
 /**
- * LIST_CUSTOM_TAG_KEYS: provisional. The dashboard populates its tag-key
- * dropdown without firing a fresh GraphQL call in some sessions (likely
- * cached metadata). Field name and operation name are educated guesses;
- * verify against a live capture and replace if they differ.
+ * EXTRA_FILTERS: captured verbatim from the dashboard's Filters panel (the
+ * request that populates the "Custom tags" dropdown). It returns every custom
+ * tag key AND its observed values in one call, scoped to the window encoded in
+ * `serializedFilter` (the same envelope `buildFilterEnvelope` produces). The
+ * `UserCustomTags` tagsType selects per-session custom tags set via
+ * `clarity('set', ...)`.
+ *
+ * Replaces the earlier guessed `listCustomTagKeys` / `listCustomTagValues`
+ * operations, which Clarity's safelisted endpoint rejected with HTTP 400.
  */
-export const LIST_CUSTOM_TAG_KEYS: Operation = {
-  operationName: "listCustomTagKeys",
-  query: "query listCustomTagKeys($projectId: String!) {projectFeatures(id: $projectId) { id customTagKeys __typename } }",
-  responseExtractPath: "data.projectFeatures.customTagKeys",
-};
-
-/**
- * LIST_CUSTOM_TAG_VALUES: provisional. Mirrors LIST_CUSTOM_TAG_KEYS shape;
- * verify via live capture and replace if it differs.
- */
-export const LIST_CUSTOM_TAG_VALUES: Operation = {
-  operationName: "listCustomTagValues",
-  query: "query listCustomTagValues($projectId: String!, $tagKey: String!) {projectFeatures(id: $projectId) { id customTagValues(tagKey: $tagKey) __typename } }",
-  responseExtractPath: "data.projectFeatures.customTagValues",
+export const EXTRA_FILTERS: Operation = {
+  operationName: "extraFilters",
+  query: "query extraFilters($projectId: String!, $serializedFilter: String!, $tagsType: TagTypeEnum, $includePageQualityIssuesSessions: Boolean) {\n  projectFeatures(id: $projectId) {\n    id\n    variables(serializedFilter: $serializedFilter, tagsType: $tagsType, includePageQualityIssuesSessions: $includePageQualityIssuesSessions) {\n      name\n      values\n      __typename\n    }\n    __typename\n  }\n}\n",
+  responseExtractPath: "data.projectFeatures.variables",
 };
 
 /**

@@ -27,24 +27,65 @@ describe("listCustomTags", () => {
   });
   afterEach(restoreProjectId);
 
-  it("returns the array of tag keys", async () => {
+  it("returns the tag-key names from the extraFilters variables response", async () => {
     (postGraphQL as any).mockResolvedValueOnce({
-      data: { projectFeatures: { customTagKeys: ["test-experiment", "checkout_error_code"] } },
+      data: { projectFeatures: { variables: [
+        { name: "test-experiment", values: ["1", "0"] },
+        { name: "checkout_error_code", values: ["network_error"] },
+      ] } },
     });
     const { listCustomTags } = await import("../tools.js");
     const result = await listCustomTags();
     expect(result).toEqual(["test-experiment", "checkout_error_code"]);
+
+    const [opName, , vars] = (postGraphQL as any).mock.calls[0];
+    expect(opName).toBe("extraFilters");
+    expect(vars.tagsType).toBe("UserCustomTags");
+    expect(typeof vars.serializedFilter).toBe("string");
+    expect(vars.serializedFilter).toContain("minEnqueuedTimestamp");
   });
 
-  it("caches results across calls", async () => {
+  it("scopes the tag list to the requested dateRange (distinct window => distinct request)", async () => {
+    (postGraphQL as any).mockResolvedValue({ data: { projectFeatures: { variables: [] } } });
+    const { listCustomTags } = await import("../tools.js");
+    await listCustomTags("yesterday");
+    await listCustomTags("last 30 days");
+    expect(postGraphQL).toHaveBeenCalledTimes(2);
+    const min1 = JSON.parse((postGraphQL as any).mock.calls[0][2].serializedFilter)
+      .filters.find((f: any) => f.field === "minEnqueuedTimestamp").value.min;
+    const min2 = JSON.parse((postGraphQL as any).mock.calls[1][2].serializedFilter)
+      .filters.find((f: any) => f.field === "minEnqueuedTimestamp").value.min;
+    expect(min1).not.toEqual(min2);
+  });
+
+  it("caches results per window across calls", async () => {
     (postGraphQL as any).mockResolvedValueOnce({
-      data: { projectFeatures: { customTagKeys: ["a", "b"] } },
+      data: { projectFeatures: { variables: [{ name: "a", values: [] }, { name: "b", values: [] }] } },
     });
     const { listCustomTags } = await import("../tools.js");
     const a = await listCustomTags();
     const b = await listCustomTags();
     expect(a).toEqual(b);
     expect(postGraphQL).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps distinct windows isolated in the cache", async () => {
+    (postGraphQL as any)
+      .mockResolvedValueOnce({ data: { projectFeatures: { variables: [{ name: "y", values: [] }] } } })
+      .mockResolvedValueOnce({ data: { projectFeatures: { variables: [{ name: "m", values: [] }] } } });
+    const { listCustomTags } = await import("../tools.js");
+    expect(await listCustomTags("yesterday")).toEqual(["y"]);
+    expect(await listCustomTags("last 30 days")).toEqual(["m"]);
+    expect(await listCustomTags("yesterday")).toEqual(["y"]); // served from cache, not "m"
+    expect(postGraphQL).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops variables with an empty/missing name", async () => {
+    (postGraphQL as any).mockResolvedValueOnce({
+      data: { projectFeatures: { variables: [{ name: "real", values: [] }, { name: "", values: [] }, { values: [] }] } },
+    });
+    const { listCustomTags } = await import("../tools.js");
+    expect(await listCustomTags()).toEqual(["real"]);
   });
 });
 
@@ -172,8 +213,11 @@ describe("compareByVariant", () => {
 
   it("auto-discovers values, fans out, and computes deltas vs control", async () => {
     (postGraphQL as any).mockImplementation(async (op: string, _q: string, vars: any) => {
-      if (op === "listCustomTagValues") {
-        return { data: { projectFeatures: { customTagValues: ["0", "1"] } } };
+      if (op === "extraFilters") {
+        return { data: { projectFeatures: { variables: [
+          { name: "test-experiment", values: ["0", "1"] },
+          { name: "unrelated", values: ["x"] },
+        ] } } };
       }
       // Pull tag value out of the filter envelope so we can return distinct numbers per variant.
       const v = String(vars.filters).match(/test-experiment=(\d+)/)?.[1];
@@ -189,6 +233,17 @@ describe("compareByVariant", () => {
     expect(result.variants[1]).toMatchObject({ value: "1", isControl: false });
     expect(result.variants[1]?.sessions).toEqual({ total: 1018, bot: 0 });
     expect(result.variants[1]?.deltas?.["sessions.total"]).toBe("-75.0%");
+  });
+
+  it("rejects with an actionable message when the tag has no data in the window", async () => {
+    (postGraphQL as any).mockResolvedValue({
+      data: { projectFeatures: { variables: [{ name: "some-other-tag", values: ["1"] }] } },
+    });
+    const { compareByVariant } = await import("../tools.js");
+    await expect(compareByVariant({ tagKey: "stopped-experiment", metrics: ["sessions"] }))
+      .rejects.toThrow(/last 7 days[\s\S]*list-custom-tags|list-custom-tags/);
+    await expect(compareByVariant({ tagKey: "stopped-experiment", metrics: ["sessions"] }))
+      .rejects.toThrow(/last 7 days/);
   });
 });
 
