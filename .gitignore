@@ -24,3 +24,6 @@ yarn-error.log*
 # OS specific files
 .DS_Store
 Thumbs.db
+
+# Playwright MCP scratch (operation-capture sessions)
+.playwright-mcp/

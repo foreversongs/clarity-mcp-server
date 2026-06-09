@@ -2,6 +2,22 @@
 
 All notable divergences from upstream `microsoft/clarity-mcp-server` and changes between fork releases.
 
+## v3.2.0
+
+### Fixed
+- **`list-custom-tags` and `compare-by-variant` HTTP 400** — both tools called GraphQL operations that don't exist on Clarity's `/api/v2` (`listCustomTagKeys` / `listCustomTagValues` were guessed field names). Clarity's endpoint is safelisted and rejected them with HTTP 400. Replaced with the real `extraFilters` operation (captured from the dashboard's Filters panel), which returns `projectFeatures.variables[] { name, values }` — every custom-tag key and its values in one call, scoped to the requested window.
+
+### Added
+- **`EXTRA_FILTERS` operation** in `operations.ts`.
+- **`dateRange` parameter on `list-custom-tags`** — the tag list is date-scoped (a tag only appears if a session in the window carried it), so the tool accepts an optional window (default last 7 days) to surface tags from older or recently-stopped experiments.
+
+### Changed
+- **`compare-by-variant` value discovery** now reads variant values from the same `extraFilters` response instead of the separate (also-400ing) `listCustomTagValues` op, and throws an actionable error when the requested tag has no data in the window.
+- **`listCustomTags` caching** is now per-window (keyed by the `dateRange` input) rather than a single global cache.
+
+### Removed
+- **`LIST_CUSTOM_TAG_KEYS` / `LIST_CUSTOM_TAG_VALUES`** operations — guessed queries that always returned HTTP 400.
+
 ## v3.1.0
 
 ### Added

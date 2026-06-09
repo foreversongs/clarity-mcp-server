@@ -25,7 +25,7 @@ export const COMPARE_BY_VARIANT_TOOL = "compare-by-variant";
 export const GET_CLICK_ELEMENTS_TOOL = "get-click-elements";
 
 // Dashboard tool descriptions.
-export const TAG_DISCOVERY_DESCRIPTION = "List all custom-tag keys defined for the Clarity project (e.g. experiment names from clarity('set', ...) calls). Use this when you need to discover what tags are available before filtering by variant.";
+export const TAG_DISCOVERY_DESCRIPTION = "List the custom-tag keys that have data for the Clarity project in a given window (e.g. experiment slugs from clarity('set', ...) calls). Use this to discover what tags are available before filtering by variant. NOTE: the list is date-scoped — a tag only appears if a session in the window carried it. Defaults to the last 7 days; pass dateRange (e.g. 'last 30 days') to surface tags from older or recently-stopped experiments.";
 
 export const QUERY_METRICS_DESCRIPTION = "Fetch typed Microsoft Clarity dashboard metrics for any combination of filters including custom-tag (variant) filters. Returns sessions, engagement, top pages, dead/rage clicks, scroll depth, and JS errors. Use this for ANY aggregate metric question — variant or not. NOTE on scroll depth: pass `filters.url` to get page-view-scoped scroll depth (right metric for single-page experiments). Without `filters.url`, only sessionScrollDepth (session-level, matches the dashboard's Scroll-depth card) is returned.";
 
